@@ -1,6 +1,5 @@
 ;;; geben.el --- DBGp protocol frontend, a script debugger
-;; $Id$
-;; 
+;;
 ;; Filename: geben.el
 ;; Author: reedom <fujinaka.tohru@gmail.com>
 ;; Maintainer: reedom <fujinaka.tohru@gmail.com>
@@ -15,19 +14,19 @@
 ;; modify it under the terms of the GNU General Public License as
 ;; published by the Free Software Foundation; either version 2, or
 ;; (at your option) any later version.
-;; 
+;;
 ;; This program is distributed in the hope that it will be useful,
 ;; but WITHOUT ANY WARRANTY; without even the implied warranty of
 ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 ;; General Public License for more details.
-;; 
+;;
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program; see the file COPYING.  If not, write to
 ;; the Free Software Foundation, Inc., 51 Franklin Street, Fifth
 ;; Floor, Boston, MA 02110-1301, USA.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 
+;;
 ;;; Commentary:
 ;;
 ;; GEBEN is a software package that interfaces Emacs to DBGp protocol
@@ -47,7 +46,7 @@
 ;; 4. Start debugging. To see geben-mode key bindings, type ?.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 
+;;
 ;;; Requirements:
 ;;
 ;; [Server side]
@@ -58,9 +57,9 @@
 ;;
 ;; [Client side]
 ;; - Emacs 22.1 and later
-;; 
+;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 
+;;
 ;;; Code:
 
 (eval-when-compile
@@ -128,6 +127,9 @@ Typically `pop-to-buffer' or `switch-to-buffer'."
 (defun geben-dbgp-display-window (buf)
   "Display a buffer anywhere in a window, depends on the circumstance."
   (cond
+   ((string=(file-name-nondirectory (buffer-file-name buf))
+            (file-name-nondirectory (buffer-file-name (window-buffer))))
+    (switch-to-buffer buf))
    ((get-buffer-window buf)
     (select-window (get-buffer-window buf))
     (switch-to-buffer buf))
@@ -223,7 +225,7 @@ If POS is omitted, then the current position is used."
 				 (list arg arg))
 			       bindings))
     body)))
-			      
+
 (defun geben-remove-directory-tree (basedir)
   (ignore-errors
     (mapc (lambda (path)
@@ -246,7 +248,7 @@ If POS is omitted, then the current position is used."
 		(member ip (mapcar (lambda (addr)
 				     (format-network-address (cdr addr) t))
 				   (network-interface-list)))))))
-  
+
 ;;--------------------------------------------------------------
 ;;  cross emacs overlay definitions
 ;;--------------------------------------------------------------
@@ -353,6 +355,7 @@ If POS is omitted, then the current position is used."
 (defvar geben-sessions nil)
 (defvar geben-current-session nil)
 
+
 ;; geben session start/finish hooks
 
 (defcustom geben-session-enter-hook nil
@@ -395,7 +398,7 @@ at the entry line of the script."
   (cursor (list :overlay nil :position nil))
   tempdir
   )
-  
+
 (defmacro geben-with-current-session (binding &rest body)
   (declare (indent 1)
 	   (debug (symbolp &rest form)))
@@ -467,7 +470,7 @@ at the entry line of the script."
   (geben-session-tempdir-remove session)
   (geben-storage-save)
   (run-hook-with-args 'geben-session-exit-hook session))
-  
+
 (defsubst geben-session-active-p (session)
   (let ((proc (geben-session-process session)))
     (and (processp proc)
@@ -585,7 +588,7 @@ For a DBGp command \`stack_get -i 1 -d 2\',
 				  (plist-get cmd :tid)
 				  (plist-get cmd :param)))
 	     " "))
-  
+
 (defsubst geben-session-cmd-make (session operand params)
   "Create a new command object."
   (list :session session
@@ -768,7 +771,7 @@ Return a cmd list."
 
 (defun geben-dbgp-response-eval (session cmd msg)
   "A response message handler for \`eval\' command."
-  (message "result: %S" 
+  (message "result: %S"
 	   (geben-dbgp-decode-value (car-safe (xml-get-children msg 'property)))))
 
 (defun geben-dbgp-decode-value (prop)
@@ -868,7 +871,7 @@ A source object forms a property list with three properties
   ;; for bug of Xdebug 2.0.3 and below:
   (replace-regexp-in-string "%28[0-9]+%29%20:%20runtime-created%20function$" ""
 			    fileuri))
-  
+
 (defun geben-source-fileuri (session local-path)
   "Guess a file uri string which counters to LOCAL-PATH."
   (let* ((tempdir (geben-session-tempdir session))
@@ -1100,7 +1103,7 @@ Or return specific TRAMP spec. (e.g. \"/user@example.com:\""
 	       (find-file-default (if path-prefix
 				      (concat path-prefix local-path)
 				    (format "/%s:%s" ip local-path))))
-	  (while (not (tramp-handle-file-regular-p 
+	  (while (not (tramp-handle-file-regular-p
 		       (setq find-file-default (read-file-name "Find remote file: "
 							       (file-name-directory find-file-default)
 							       find-file-default t
@@ -1342,14 +1345,14 @@ debugging is finished."
 (defun geben-session-breakpoint-find (session id-or-obj)
   "Find a breakpoint.
 id-or-obj should be either a breakpoint id or a breakpoint object."
-  (find-if 
+  (find-if
    (if (stringp id-or-obj)
        (lambda (bp)
 	 (string= (plist-get bp :id) id-or-obj))
      (lambda (bp)
        (geben-bp= id-or-obj bp)))
    (geben-breakpoint-list (geben-session-breakpoint session))))
-  
+
 ;; dbgp
 
 (defun geben-dbgp-breakpoint-restore (session)
@@ -1501,7 +1504,7 @@ id-or-obj should be either a breakpoint id or a breakpoint object."
     (define-key map "?" 'geben-breakpoint-list-mode-help)
     map)
   "Keymap for `geben-breakpoint-list-mode'")
-    
+
 (defun geben-breakpoint-list-mode (session)
   "Major mode for GEBEN's breakpoint list.
 The buffer commands are:
@@ -1935,7 +1938,7 @@ the file."
 
 (defun geben-dbgp-breakpoint-list-refresh (session)
   (geben-breakpoint-list-refresh))
-  
+
 
 
 ;;==============================================================
@@ -1959,17 +1962,17 @@ the file."
   '((t :inherit 'font-lock-type-face))
   "Face used to highlight type name."
   :group 'geben-highlighting-faces)
-  
+
 (defface geben-context-class-face
   '((t :inherit 'font-lock-constant-face))
   "Face used to highlight type name."
   :group 'geben-highlighting-faces)
-  
+
 (defface geben-context-string-face
   '((t :inherit 'font-lock-string-face))
   "Face used to highlight string value."
   :group 'geben-highlighting-faces)
-  
+
 (defface geben-context-constant-face
   '((t :inherit 'font-lock-constant-face))
   "Face used to highlight numeric value."
@@ -2078,7 +2081,7 @@ the file."
 (defsubst geben-context-property-name (property)
   "Get name attribute value from PROPERTY."
   (geben-context-property-attribute property 'name))
-	
+
 (defsubst geben-context-property-fullname (property)
   "Get fullname attribute value from PROPERTY."
   (geben-context-property-attribute property 'fullname))
@@ -2191,7 +2194,7 @@ Child nodes can be short for :property property of TREE."
 	 (value (geben-context-property-value property))
 	 tag)
     (let ((formatter (plist-get typeinfo :name-formatter)))
-      (setq tag 
+      (setq tag
 	    (if formatter
 		(funcall formatter property)
 	      (propertize (geben-context-property-name property)
@@ -2215,7 +2218,7 @@ Child nodes can be short for :property property of TREE."
 	      :expander 'geben-context-property-tree-expand
 	      :expander-p 'geben-context-property-tree-expand-p)
       (list 'item :tag (concat "   " tag)))))
-  
+
 (defun geben-context-property-tree-context-id (tree)
   "Get context id to which TREE belongs."
   (when tree
@@ -2348,7 +2351,7 @@ After fetching it calls CALLBACK function."
 	     (or force
 		 (geben-session-context-buffer-visible-p session)))
     (geben-context-list-display session depth (not force))))
-  
+
 (defun geben-context-list-display (session depth &optional no-select)
   "Display context variables in the context buffer."
   (unless (geben-session-active-p session)
@@ -2645,6 +2648,10 @@ The buffer commands are:
   :group 'geben
   :type 'hook)
 
+(defcustom geben-dbgp-display-redirect-window nil
+  "Display redirected output window immediately after the end of execution"
+  :group 'geben)
+
 (defun geben-session-redirect-init (session)
   (setf (geben-session-redirect session) (geben-redirect-make))
   (dolist (type '(:stdout :stderr))
@@ -2667,7 +2674,7 @@ The buffer commands are:
 	      (setq buffer-undo-list t)
 	      (run-hook-with-args 'geben-dbgp-redirect-buffer-init-hook (current-buffer)))
 	    (current-buffer))))))
-  
+
 (defun geben-session-redirect-buffer-name (session type)
   "Select buffer name for a redirection type."
   (let ((redirect (geben-session-redirect session)))
@@ -2675,7 +2682,7 @@ The buffer commands are:
 		   (geben-redirect-stdout redirect))
 	      (and (eq type :stderr)
 		   (geben-redirect-stderr redirect)))
-      (geben-session-buffer-name session 
+      (geben-session-buffer-name session
 				 (cond
 				  ((geben-redirect-combine redirect)
 				   geben-redirect-combine-buffer-name)
@@ -2726,7 +2733,8 @@ The buffer commands are:
 		   (geben-redirect-coding-system (geben-session-redirect session)))))
 	(goto-char (or save-pos
 		       (point-max))))
-      (geben-dbgp-display-window buf))))
+      (when geben-dbgp-display-redirect-window
+        (geben-dbgp-display-window buf)))))
 
 (defun geben-dbgp-command-stdout (session mode)
   "Send `stdout' command."
@@ -2822,7 +2830,7 @@ The buffer commands are:
       (message "GEBEN: Rejected new connection from %s (Already in debugging)"
 	       (car (process-contact proc))))
     accept-p))
-	
+
 (defun geben-dbgp-session-init (proc)
   "Initialize SESSION environment."
   (let ((session (geben-session-make :process proc)))
@@ -2831,7 +2839,7 @@ The buffer commands are:
     (with-current-buffer (process-buffer proc)
       (set (make-local-variable 'geben-current-session) session)
       (rename-buffer (geben-session-buffer-name session geben-process-buffer-name) t))))
-  
+
 (defun geben-dbgp-session-filter (proc string)
   "Process DBGp response STRING.
 Parse STRING, find xml chunks, convert them to xmlized lisp objects
@@ -2946,7 +2954,7 @@ of the function is passed to feature_set DBGp command."
 	    (name (symbol-name (nth 1 entry)))
 	    (param (nth 2 entry)))
 	(case method
-	      (:set 
+	      (:set
 	       (let ((value (cond
 			     ((null param) nil)
 			     ((symbolp param)
@@ -3086,7 +3094,7 @@ The geben-mode buffer commands:
   (let ((win (get-buffer-window (current-buffer))))
     (if win
 	(set-window-buffer win (current-buffer)))))
-  
+
 (add-hook 'geben-source-visit-hook 'geben-enter-geben-mode)
 
 (defun geben-mode-read-only-handler (data context caller)
@@ -3124,7 +3132,7 @@ The geben-mode buffer commands:
   (interactive)
   (quit-window)
   (geben-where))
-  
+
 (defun geben-mode-help ()
   "Display description and key bindings of `geben-mode'."
   (interactive)
@@ -3143,7 +3151,7 @@ Default is `geben-step-into'."
     (:step-over (geben-step-over))
     (:step-into (geben-step-into))
     (t (geben-step-into))))
-     
+
 (defun geben-step-into ()
   "Step into the definition of the function or method about to be called.
 If there is a function call involved it will break on the first
@@ -3315,7 +3323,7 @@ hit-value interactively."
 	      ;; at this present some debugger engines' implementations is buggy:
 	      ;; some requires fileuri and some don't accept it.
 	      (let ((local-path (file-truename (buffer-file-name (current-buffer)))))
-		(read-string "fileuri: " 
+		(read-string "fileuri: "
 			     (or (geben-session-source-fileuri session local-path)
 				 (geben-source-fileuri session local-path))
 			     'geben-set-breakpoint-fileuri-history))))
@@ -3348,7 +3356,7 @@ hit-value interactively."
 	      ;; at this present some debugger engines' implementations are buggy:
 	      ;; some requires fileuri and some don't accept it.
 	      (let ((local-path (file-truename (buffer-file-name (current-buffer)))))
-		(read-string "fileuri: " 
+		(read-string "fileuri: "
 			     (or (geben-session-source-fileuri session local-path)
 				 (geben-source-fileuri session local-path))
 			     'geben-set-breakpoint-fileuri-history))))
@@ -3377,7 +3385,7 @@ hit-value interactively."
     (geben-set-breakpoint-common session hit-value
 				 (geben-bp-make session :exception
 						:exception name))))
-   
+
 (defun geben-set-breakpoint-conditional (expr fileuri &optional lineno hit-value)
   "Set a breakpoint to break at when the expression EXPR is true in the file FILEURI.
 Optionally, with a numeric argument you can specify `hit-value'
@@ -3399,7 +3407,7 @@ hit-value interactively."
       (setq lineno (read-string "Line number to evaluate (blank means entire file): "
 				(number-to-string (geben-what-line))))
       (setq hit-value current-prefix-arg))
-    
+
     (geben-set-breakpoint-common session hit-value
 				 (geben-bp-make session :conditional
 						:expression expr
@@ -3472,12 +3480,12 @@ Key mapping and other information is described its help page."
       (geben-with-current-session session
 	(geben-dbgp-command-eval session expr)))))
 
-(defun geben-open-file (fileuri)
+(defun geben-open-file (fileuri &optional session)
   "Open a debugger server side file specified by FILEURI.
 FILEURI forms like as \`file:///path/to/file\'."
   (interactive (list (read-string "Open file: " "file://")))
-  (geben-with-current-session session
-    (geben-dbgp-command-source session fileuri)))
+  (let ((session (if session session geben-current-session)))
+    (when session (geben-dbgp-command-source session fileuri))))
 
 (defun geben-show-backtrace ()
   "Display backtrace list.
@@ -3545,7 +3553,15 @@ from \`redirect', \`intercept' and \`disabled'."
 			t)))
 	(when file-path
 	  (geben-open-file (geben-source-fileuri session file-path))))))
-  
+
+(defun geben-find-this-file ()
+  "Opens a new debugging buffer for the current file using the first available geben session."
+  (interactive)
+  (let ((file-path (file-truename buffer-file-name))
+        (session (car geben-sessions)))
+    (when (and file-path session)
+      (geben-open-file (geben-source-fileuri session file-path) session))))
+
 
 (defcustom geben-dbgp-default-port 9000
   "Default port number to listen a new DBGp connection."
@@ -3634,7 +3650,7 @@ described its help page."
     (dbgp-listener-kill port)
     (and (interactive-p)
 	 (message (if listener
-		      "The DBGp listener for port %d is terminated." 
+		      "The DBGp listener for port %d is terminated."
 		    "DBGp listener for port %d does not exist.")
 		  port))
     (and listener t)))
@@ -3677,3 +3693,4 @@ associating with the IDEKEY."
 (defalias 'geben-proxy-end #'dbgp-proxy-unregister)
 
 (provide 'geben)
+;;; geben.el ends here
