@@ -127,8 +127,9 @@ Typically `pop-to-buffer' or `switch-to-buffer'."
 (defun geben-dbgp-display-window (buf)
   "Display a buffer anywhere in a window, depends on the circumstance."
   (cond
-   ((string=(file-name-nondirectory (buffer-file-name buf))
-            (file-name-nondirectory (buffer-file-name (window-buffer))))
+   ((and (buffer-file-name (window-buffer))
+         (string=(file-name-nondirectory (buffer-file-name buf))
+                 (file-name-nondirectory (buffer-file-name (window-buffer)))))
     (switch-to-buffer buf))
    ((get-buffer-window buf)
     (select-window (get-buffer-window buf))
