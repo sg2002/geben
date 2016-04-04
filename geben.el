@@ -2787,12 +2787,12 @@ The buffer commands are:
      (read-char (format "[port %s] %s" port (second error-sexp))
 		nil 3))))
 
-(defun geben-dbgp-start-proxy (ip-or-addr port idekey ;;multi-session-p
+(defun geben-dbgp-start-proxy (ip-or-addr port idekey multi-session-p
 					  session-port)
   "Create DBGp listeners at each CONNECTION-POINTS."
   (condition-case error-sexp
       (let* ((result
-	      (dbgp-proxy-register-exec ip-or-addr port idekey nil ;; multi-session-p
+	      (dbgp-proxy-register-exec ip-or-addr port idekey multi-session-p
 					session-port
 					:session-accept 'geben-dbgp-session-accept-p
 					:session-init 'geben-dbgp-session-init
@@ -3656,7 +3656,7 @@ described its help page."
 		  port))
     (and listener t)))
 
-(defun geben-proxy (ip-or-addr port idekey ;;multi-session-p
+(defun geben-proxy (ip-or-addr port idekey multi-session-p
 			       &optional session-port)
   "Start a new DBGp proxy listener.
 The DBGp proxy should be found at IP-OR-ADDR / PORT.
@@ -3677,7 +3677,7 @@ associating with the IDEKEY."
 				   (nth 2 geben-dbgp-default-proxy)
 				   (nth 2 (default-value 'geben-dbgp-default-proxy)))))
 		  (dbgp-read-string "IDE key: " nil 'dbgp-proxy-idekey-history))
-		;;(not (memq (read-char "Multi session(Y/n): ") '(?N ?n)))
+		(not (memq (read-char "Multi session(Y/n): ") '(?N ?n)))
 		(let ((default (or (car dbgp-proxy-session-port-history)
 				   (nth 4 geben-dbgp-default-proxy)
 				   (nth 4 (default-value 'geben-dbgp-default-proxy)))))
@@ -3688,7 +3688,7 @@ associating with the IDEKEY."
 						 (format "default %d, 0 to use any free port" default)
 					       (format "leave empty to use any free port")))
 				     default 'dbgp-proxy-session-port-history))))
-  (geben-dbgp-start-proxy ip-or-addr port idekey ;;multi-session-p
+  (geben-dbgp-start-proxy ip-or-addr port idekey multi-session-p
 			  session-port))
 
 (defalias 'geben-proxy-end #'dbgp-proxy-unregister)

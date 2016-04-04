@@ -1,6 +1,6 @@
 * GEBEN
 
-Note: this is a fork with minor usability improvements, the changes are listed [[https://github.com/sg2002/geben/blob/master/README.org#Changes][here]].
+Note: this is a fork with minor usability improvements, the changes are listed [[https://github.com/sg2002/geben/#what's%20new][here]].
 
 GEBEN is a software package that interfaces Emacs to DBGp protocol
 with which you can debug running scripts interactive. At this present
@@ -118,23 +118,19 @@ Here is an illustration on PHP debugging.
 6. If you felt you'd debugged enough, it's time to quit GEBEN.
    To quit GEBEN, type: M-x geben-end
 
-** Changes
-- GEBEN no longer breaks network connectivity in packages like erc.
-
+** What's new
 - The output window is no longer popped every time after execution. This is controlled by a new custom geben-dbgp-display-redirect-window.
 
 - New function geben-find-this-file. When geben session is active, executing this function opens the current file in the debug mode.
 
+- Multi-session debugging is available when you use a dbgp proxy. This code was there all along, but was commented out for some unknown reason.
+
+- GEBEN no longer breaks network connectivity in packages like erc.
 ** Support
 
 Geben was orignally hosted on Google Code. Since it was closed, the official repository seems to be [[https://github.com/pokehanai/geben-on-emacs][this]].
 
 ** Known issues
-
-- This version is not tested with Xdebug 2.1.* yet.
-
-- There are some issues related Xdebug, version of at least 2.0.3.
-
 - Xdebug does not support STDERR command feature so that STDERR
   redirection feature does not work expectedly.
 
