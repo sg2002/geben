@@ -2820,13 +2820,14 @@ The buffer commands are:
 		   (not (some (lambda (session)
 				(eq proxy (dbgp-plist-get proc :proxy)))
 			      geben-sessions))))
-	   (let ((port (dbgp-port-get (dbgp-listener-get proc))))
-	     (not (some (lambda (session)
-			  (let ((oproc (geben-session-process session)))
-			    (and oproc
-				 (not (dbgp-proxy-p oproc))
-				 (eq port (dbgp-port-get (dbgp-listener-get oproc))))))
-			geben-sessions))))))
+           (if (geben-check-multiple-sessions) t
+             (let ((port (dbgp-port-get (dbgp-listener-get proc))))
+               (not (some (lambda (session)
+                            (let ((oproc (geben-session-process session)))
+                              (and oproc
+                                   (not (dbgp-proxy-p oproc))
+                                   (eq port (dbgp-port-get (dbgp-listener-get oproc))))))
+                          geben-sessions)))))))
     (unless accept-p
       (message "GEBEN: Rejected new connection from %s (Already in debugging)"
 	       (car (process-contact proc))))
@@ -2914,7 +2915,8 @@ and call `geben-dbgp-entry' with each chunk."
   '((:set max_data 32768)
     (:set max_depth 1)
     (:set max_children 32)
-    (:get breakpoint_types geben-dbgp-breakpoint-store-types))
+    (:get breakpoint_types geben-dbgp-breakpoint-store-types)
+    (:set multiple_sessions 1))
   "*Specifies set of feature variables for each new debugging session.
 Each entry forms a list (METHOD FEATURE_NAME VALUE_OR_CALLBACK).
 METHOD is either `:get' or `:set'.
@@ -2945,6 +2947,13 @@ of the function is passed to feature_set DBGp command."
 			      (const :tag "show_hidden (:get :set)" show_hidden)
 			      (const :tag "notify_ok (:get :set)" notify_ok))
 		       sexp)))
+
+(defun geben-check-multiple-sessions()
+  "Returns t or nil, depending on whether there is support for mulitple
+ sessions in `geben-dbgp-feature-list'."
+  (if(member '(:set multiple_sessions 1) geben-dbgp-feature-list)
+      t
+    nil))
 
 (defun geben-dbgp-feature-init (session)
   "Configure debugger engine with value of `geben-dbgp-feature-list'."
@@ -3677,7 +3686,9 @@ associating with the IDEKEY."
 				   (nth 2 geben-dbgp-default-proxy)
 				   (nth 2 (default-value 'geben-dbgp-default-proxy)))))
 		  (dbgp-read-string "IDE key: " nil 'dbgp-proxy-idekey-history))
-		(not (memq (read-char "Multi session(Y/n): ") '(?N ?n)))
+                (if (equal current-prefix-arg '(4))
+                       (not (memq (read-char "Multi session(Y/n): ") '(?N ?n)))
+                    (geben-check-multiple-sessions))
 		(let ((default (or (car dbgp-proxy-session-port-history)
 				   (nth 4 geben-dbgp-default-proxy)
 				   (nth 4 (default-value 'geben-dbgp-default-proxy)))))
