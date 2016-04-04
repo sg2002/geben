@@ -120,6 +120,8 @@ Here is an illustration on PHP debugging.
 
 ** What's new
 - Multi-session debugging is enabled by default.
+- Calling geben-where outside of a geben session jumps to the first open session.
+- Calling geben-where within a buffer with the current breakpoint jumps to the next open session.
 - The output window is no longer popped every time after execution. This is controlled by a new custom geben-dbgp-display-redirect-window.
 - New function geben-find-this-file. When geben session is active, executing this function opens the current file in the debug mode.
 - GEBEN no longer breaks network connectivity in packages like erc.

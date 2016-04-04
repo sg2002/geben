@@ -3126,17 +3126,35 @@ The geben-mode buffer commands:
 (add-hook 'geben-source-release-hook
 	  (lambda () (geben-mode 0)))
 
+(defun geben-goto-session (session)
+  (let* ((stack (second (car (geben-session-stack session))))
+                   (fileuri (geben-source-fileuri-regularize (cdr (assq 'filename stack))))
+                   (lineno (cdr (assq 'lineno stack))))
+    (geben-session-cursor-update session fileuri lineno)))
+
+(defun geben-goto-session-next ()
+  (when (not (null geben-sessions))
+    (let* ((next-session (cadr (memq geben-current-session geben-sessions)))
+           (session (if next-session next-session (car geben-sessions))))
+        (geben-goto-session session))))
+
 (defun geben-where ()
-  "Move to the current breaking point."
+  "Move to the current breaking point. If called outside of a geben session,
+moves to the first available geben session. If current buffer is already
+the one that contains current breaking point, moves to the next session,
+if there are more than one."
   (interactive)
-  (geben-with-current-session session
-    (if (geben-session-stack session)
-	(let* ((stack (second (car (geben-session-stack session))))
-	       (fileuri (geben-source-fileuri-regularize (cdr (assq 'filename stack))))
-	       (lineno (cdr (assq 'lineno stack))))
-	  (geben-session-cursor-update session fileuri lineno))
-      (when (interactive-p)
-	(message "GEBEN is not started.")))))
+  (if geben-current-session
+      (geben-with-current-session
+       session
+       (let* ((stack (second (car (geben-session-stack session))))
+              (fileuri (geben-source-fileuri-regularize (cdr (assq 'filename stack))))
+              (lineno (cdr (assq 'lineno stack))))
+         (if (or (not buffer-file-name)
+                 (eq fileuri (geben-source-fileuri session (file-truename buffer-file-name))))
+             (geben-goto-session session)
+           (geben-goto-session-next))))
+  (geben-goto-session-next)))
 
 (defun geben-quit-window ()
   (interactive)
