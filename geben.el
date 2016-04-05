@@ -114,11 +114,12 @@
 
 (defvar geben-dynamic-property-buffer-p nil)
 
-(defcustom geben-display-window-function 'pop-to-buffer
-  "*Function to display a debuggee script's content.
-Typically `pop-to-buffer' or `switch-to-buffer'."
+(defvar geben-source-window nil)
+
+(defcustom geben-replace-source-buffers 'nil
+  "*Replace the previous buffer stopped at a breakpoint with a new one."
   :group 'geben
-  :type 'function)
+  :type 'boolean)
 
 (defsubst geben-dbgp-dynamic-property-bufferp (buf)
   (with-current-buffer buf
@@ -136,20 +137,34 @@ Typically `pop-to-buffer' or `switch-to-buffer'."
     (switch-to-buffer buf))
    ((or (eq 1 (count-windows))
 	(not (geben-dbgp-dynamic-property-buffer-visiblep)))
-    (funcall geben-display-window-function buf))
+    (if (and (not (eq 1 (count-windows)))
+         (window-live-p geben-source-window))
+        (if (or geben-replace-source-buffers
+             (and (not geben-replace-source-buffers)
+                     (not (with-current-buffer
+                              (window-buffer geben-source-window)
+                            geben-mode))))
+            (set-window-buffer geben-source-window buf)
+          (let ((previous-buffer
+                 (window-buffer geben-source-window)))
+            (set-window-buffer geben-source-window buf)
+            (set-window-buffer geben-source-window previous-buffer)))
+      (progn
+        (pop-to-buffer buf)
+        (setq geben-source-window (get-buffer-window buf)))))
    (t
     (let ((candidates (make-vector 3 nil))
 	  (dynamic-p (geben-dbgp-dynamic-property-bufferp buf)))
       (block finder
-	     (walk-windows (lambda (window)
-			     (if (geben-dbgp-dynamic-property-bufferp (window-buffer window))
-				 (if dynamic-p
-				     (unless (aref candidates 1)
-				       (aset candidates 1 window)))
-			       (if (eq (selected-window) window)
-				   (aset candidates 2 window)
-				 (aset candidates 0 window)
-				 (return-from finder))))))
+        (walk-windows (lambda (window)
+                        (if (geben-dbgp-dynamic-property-bufferp (window-buffer window))
+                            (if dynamic-p
+                                (unless (aref candidates 1)
+                                  (aset candidates 1 window)))
+                          (if (eq (selected-window) window)
+                              (aset candidates 2 window)
+                            (aset candidates 0 window)
+                            (return-from finder))))))
       (select-window (or (aref candidates 0)
 			 (aref candidates 1)
 			 (aref candidates 2)
