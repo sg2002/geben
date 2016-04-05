@@ -1,4 +1,11 @@
-Version 0.26 (20010-03-29)
+Version 0.27 (2010-12-05)
+
+  * improved:
+    - Now you can set any breakpoint out of a debugging session.
+    - Changed name format of a debugging buffer, as like "xxx.php <dbg>".
+    - Changed the default value of `geben-source-coding-system' to nil.
+
+Version 0.26 (2010-03-29)
 
   * new command:
     - `geben-find-file', bound to 'C-c f' in geben-mode.
@@ -57,7 +64,7 @@ Version 0.21 (2009-01-10)
 
 Version 0.20 (2009-01-08)
 
-  Redesigned. 
+  Redesigned.
 
   From this release GEBEN does not require an external DBGp client
   program.
@@ -79,7 +86,7 @@ Version 0.19 (2008-11-06)
 Version 0.18 (2008-11-04)
 
   From this release GEBEN has shifted from beta stage.
-  
+
   Incompatible changes:
   * GEBEN dropped Emacs 21.4 support.
     Now GEBEN requires Emacs 22.1 and later.
@@ -110,7 +117,7 @@ Version 0.16 (2008-10-25)
   * fixed: improved session finishing handling.
   * fixed: when reopen a debuggee script file which has any line
            breakpoints, GEBEN had failed to restore overlays.
-  
+
 Version 0.15 (2008-10-22)
 
   Visible changes:
@@ -168,7 +175,7 @@ Version 0.11 (2008-10-08)
 Version 0.10 (2008-10-07)
 
  Incompatible changes:
-  * Removed dependencies on `CEDET' package. 
+  * Removed dependencies on `CEDET' package.
 
  Visible changes:
   * fixed: Improved line-no breakpoint handling.
@@ -181,7 +188,7 @@ Version 0.10 (2008-10-07)
     - geben-show-breakpoints-debugging-only
   * custom face added:
     - geben-breakpoint-face
-			  
+
 Version 0.01 (2006-12-26)
 
  * Sample implementation.

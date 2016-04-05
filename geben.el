@@ -371,7 +371,6 @@ If POS is omitted, then the current position is used."
 (defvar geben-sessions nil)
 (defvar geben-current-session nil)
 
-
 ;; geben session start/finish hooks
 
 (defcustom geben-session-enter-hook nil
@@ -414,6 +413,14 @@ at the entry line of the script."
   (cursor (list :overlay nil :position nil))
   tempdir
   )
+
+(defvar geben-offline-session nil)
+
+(defun geben-offline-session ()
+  (unless geben-offline-session
+    (setq geben-offline-session (geben-session-make :state :offline))
+    (run-hook-with-args 'geben-session-enter-hook geben-offline-session))
+  geben-offline-session)
 
 (defmacro geben-with-current-session (binding &rest body)
   (declare (indent 1)
@@ -825,11 +832,15 @@ Return a cmd list."
 
 ;; file hooks
 
-(defcustom geben-source-visit-hook nil
+(defcustom geben-source-visit-hook 'geben-rename-visit-buffer
   "*Hook running at when GEBEN visits a debuggee script file.
 Each function is invoked with one argument, BUFFER."
   :group 'geben
   :type 'hook)
+
+(defun geben-rename-visit-buffer (session buf)
+  (with-current-buffer buf
+    (rename-buffer (format "%s <dbg>" (file-name-nondirectory (buffer-file-name))) t)))
 
 (defcustom geben-close-mirror-file-after-finish t
   "*Specify whether GEBEN should close fetched files from remote site after debugging.
@@ -853,7 +864,7 @@ If the value is nil, the files left in buffers."
 ;; source hash
 ;;--------------------------------------------------------------
 
-(defcustom geben-source-coding-system 'utf-8
+(defcustom geben-source-coding-system nil
   "Coding system for source code retrieving remotely via the debugger engine."
   :group 'geben
   :type 'coding-system)
@@ -1225,13 +1236,13 @@ will be displayed in a window."
 (defstruct (geben-breakpoint
 	    (:constructor nil)
 	    (:constructor geben-breakpoint-make))
-  "Breakpoint setting.
+  "Configuration of breakpoints for a session.
 
 types:
-  Breakpoint types supported by the current debugger engine.
+  Breakpoint types, supported by the current debugger engine.
 
 list:
-  Break point list."
+  A list of break points."
   (types '(:line :call :return :exception :conditional))
   list)
 
@@ -1373,9 +1384,12 @@ id-or-obj should be either a breakpoint id or a breakpoint object."
 
 (defun geben-dbgp-breakpoint-restore (session)
   "Restore breakpoints against new DBGp session."
-  (let ((breakpoints (geben-breakpoint-list (geben-session-breakpoint session)))
+  (let ((breakpoints (mapcan (lambda (session)
+			       (prog1
+				   (geben-breakpoint-list (geben-session-breakpoint session))
+				 (setf (geben-breakpoint-list (geben-session-breakpoint session)) nil)))
+			     (list session (geben-offline-session))))
 	overlay)
-    (setf (geben-breakpoint-list (geben-session-breakpoint session)) nil)
     (dolist (bp breakpoints)
       ;; User may edit code since previous debugging session
       ;; so that lineno breakpoints set before may moved.
@@ -1923,7 +1937,40 @@ the file."
       (plist-put bp :hit-value (geben-cmd-param-get cmd "-h"))
       (geben-breakpoint-list-refresh))))
 
-;;; breakpoint_remove
+(defvar geben-backtrace-mode-map nil
+  "Keymap for `geben-backtrace-mode'")
+(unless geben-backtrace-mode-map
+  (setq geben-backtrace-mode-map
+	(let ((map (make-sparse-keymap)))
+	  (define-key map [mouse-2] 'geben-backtrace-mode-mouse-goto)
+	  (define-key map "\C-m" 'geben-backtrace-mode-goto)
+	  (define-key map "q" 'geben-quit-window)
+	  (define-key map "p" 'previous-line)
+	  (define-key map "n" 'next-line)
+	  (define-key map "v" 'geben-backtrace-mode-context)
+	  (define-key map "?" 'geben-backtrace-mode-help)
+	  map)))
+
+(defun geben-backtrace-mode (session)
+  "Major mode for GEBEN's backtrace output.
+The buffer commands are:
+\\{geben-backtrace-mode-map}"
+  (interactive)
+  (unless (eq 'geben-backtrace-mode major-mode)
+    (kill-all-local-variables)
+    (use-local-map geben-backtrace-mode-map)
+    (setq major-mode 'geben-backtrace-mode)
+    (setq mode-name "GEBEN backtrace")
+    (set (make-local-variable 'revert-buffer-function)
+	 (lambda (a b) nil))
+    (and (fboundp 'font-lock-defontify)
+	 (add-hook 'change-major-mode-hook 'font-lock-defontify nil t))
+    (setq buffer-read-only t)
+    (buffer-disable-undo)
+    (if (fboundp 'run-mode-hooks)
+	(run-mode-hooks 'geben-backtrace-mode-hook)
+      (run-hooks 'geben-backtrace-mode-hook)))
+  (set (make-local-variable 'geben-current-session) session))
 
 (defun geben-dbgp-command-breakpoint-remove (session bid)
   "Send `breakpoint_remove' command."
@@ -2670,13 +2717,14 @@ The buffer commands are:
 
 (defun geben-session-redirect-init (session)
   (setf (geben-session-redirect session) (geben-redirect-make))
-  (dolist (type '(:stdout :stderr))
-    (let ((buf (get-buffer (geben-session-redirect-buffer-name session type))))
-      (when (buffer-live-p buf)
-	(with-current-buffer buf
-	  (let ((inhibit-read-only t)
-		(inhibit-modification-hooks t))
-	    (erase-buffer)))))))
+  (when (geben-session-process session)
+    (dolist (type '(:stdout :stderr))
+      (let ((buf (get-buffer (geben-session-redirect-buffer-name session type))))
+	(when (buffer-live-p buf)
+	  (with-current-buffer buf
+	    (let ((inhibit-read-only t)
+		  (inhibit-modification-hooks t))
+	      (erase-buffer))))))))
 
 (add-hook 'geben-session-enter-hook #'geben-session-redirect-init)
 
@@ -3321,23 +3369,25 @@ With just a prefix arg \(\\[universal-argument] \\[geben-set-breakpoint-line]), 
 this command will also ask a
 hit-value interactively."
   (interactive (list nil nil current-prefix-arg nil))
-  (geben-with-current-session session
-    (let ((local-path (if fileuri
-			  (geben-session-source-local-path session fileuri)
-			(buffer-file-name (current-buffer)))))
-      (geben-set-breakpoint-common session hit-value
-				   (geben-bp-make
-				    session :line
-				    :fileuri (or fileuri
-						 (geben-session-source-fileuri session local-path)
-						 (geben-session-source-fileuri session (file-truename local-path))
-						 (geben-source-fileuri session local-path))
-				    :lineno (if (numberp lineno)
-						lineno
-					      (geben-what-line))
-				    :local-path local-path
-				    :overlay t
-				    :run-once temporary-p)))))
+  (let ((geben-current-session (or geben-current-session
+				   (geben-offline-session))))
+    (geben-with-current-session session
+      (let ((local-path (if fileuri
+			    (geben-session-source-local-path session fileuri)
+			  (buffer-file-name (current-buffer)))))
+	(geben-set-breakpoint-common session hit-value
+				     (geben-bp-make
+				      session :line
+				      :fileuri (or fileuri
+						   (geben-session-source-fileuri session local-path)
+						   (geben-session-source-fileuri session (file-truename local-path))
+						   (geben-source-fileuri session local-path))
+				      :lineno (if (numberp lineno)
+						  lineno
+						(geben-what-line))
+				      :local-path local-path
+				      :overlay t
+				      :run-once temporary-p))))))
 
 (defvar geben-set-breakpoint-call-history nil)
 (defvar geben-set-breakpoint-fileuri-history nil)
@@ -3527,8 +3577,8 @@ Key mapping and other information is described its help page."
   "Open a debugger server side file specified by FILEURI.
 FILEURI forms like as \`file:///path/to/file\'."
   (interactive (list (read-string "Open file: " "file://")))
-  (let ((session (if session session geben-current-session)))
-    (when session (geben-dbgp-command-source session fileuri))))
+  (geben-with-current-session session
+    (geben-dbgp-command-source session fileuri)))
 
 (defun geben-show-backtrace ()
   "Display backtrace list.
@@ -3685,10 +3735,7 @@ described its help page."
       (if (= 1 (length ports))
 	  (string-to-number (car ports))
 	;; ask user for the target idekey.
-	(let ((num (completing-read "Listener port to kill: " ports nil t)))
-	  (if (string< "" num)
-	      (read num)
-	    (signal 'quit nil)))))))
+	(read (completing-read "Listener port to kill: " ports nil t))))))
   (let ((listener (dbgp-listener-find port)))
     (dbgp-listener-kill port)
     (and (interactive-p)
