@@ -140,10 +140,15 @@
     (if (and (not (eq 1 (count-windows)))
          (window-live-p geben-source-window))
         (if (or geben-replace-source-buffers
-             (and (not geben-replace-source-buffers)
-                     (not (with-current-buffer
-                              (window-buffer geben-source-window)
-                            geben-mode))))
+                (and (not geben-replace-source-buffers)
+                     (or (not (with-current-buffer
+                                  (window-buffer geben-source-window)
+                                geben-mode))
+                         (equal (with-current-buffer buf
+                               geben-current-session)
+                             (with-current-buffer
+                                 (window-buffer geben-source-window)
+                               geben-current-session)))))
             (set-window-buffer geben-source-window buf)
           (let ((previous-buffer
                  (window-buffer geben-source-window)))
