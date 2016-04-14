@@ -125,38 +125,35 @@
   (with-current-buffer buf
     (symbol-value 'geben-dynamic-property-buffer-p)))
 
+(defun geben-set-next-window-buffer()
+  (let ((previous-buffer
+         (window-buffer geben-source-window)))
+    (set-window-buffer geben-source-window buf)
+    (set-window-buffer geben-source-window previous-buffer)))
+
 (defun geben-dbgp-display-window (buf)
   "Display a buffer anywhere in a window, depends on the circumstance."
   (cond
    ((and (buffer-file-name (window-buffer))
+         (buffer-file-name buf)
          (string=(file-name-nondirectory (buffer-file-name buf))
                  (file-name-nondirectory (buffer-file-name (window-buffer)))))
     (switch-to-buffer buf))
    ((get-buffer-window buf)
     (select-window (get-buffer-window buf))
     (switch-to-buffer buf))
-   ((or (eq 1 (count-windows))
-	(not (geben-dbgp-dynamic-property-buffer-visiblep)))
-    (if (and (not (eq 1 (count-windows)))
-         (window-live-p geben-source-window))
-        (if (or geben-replace-source-buffers
-                (and (not geben-replace-source-buffers)
-                     (or (not (with-current-buffer
-                                  (window-buffer geben-source-window)
-                                geben-mode))
-                         (equal (with-current-buffer buf
-                               geben-current-session)
-                             (with-current-buffer
-                                 (window-buffer geben-source-window)
-                               geben-current-session)))))
-            (set-window-buffer geben-source-window buf)
-          (let ((previous-buffer
-                 (window-buffer geben-source-window)))
-            (set-window-buffer geben-source-window buf)
-            (set-window-buffer geben-source-window previous-buffer)))
-      (progn
-        (pop-to-buffer buf)
-        (setq geben-source-window (get-buffer-window buf)))))
+   ((and (not (geben-dbgp-dynamic-property-buffer-visiblep))
+         (geben-dbgp-dynamic-property-bufferp buf))
+         (pop-to-buffer buf))
+   ((or (> (count-windows) 1)
+	(geben-dbgp-dynamic-property-buffer-visiblep))
+    (pop-to-buffer buf)
+    (setq geben-source-window (get-buffer-window buf)))
+   ((and (window-live-p geben-source-window)
+         geben-replace-source-buffers)
+    (geben-set-next-window-buffer buf))
+   ((window-live-p geben-source-window)
+    (geben-set-next-window-buffer buf))
    (t
     (let ((candidates (make-vector 3 nil))
 	  (dynamic-p (geben-dbgp-dynamic-property-bufferp buf)))
