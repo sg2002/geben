@@ -318,13 +318,19 @@ If POS is omitted, then the current position is used."
       (when (consp s)
 	(setq s (car s)))
       (when (stringp s)
-	(setq s (cond
-		 ((equal "base64" data-encoding)
-		  (base64-decode-string s))
-		 (t s)))
-	(if coding-system
-	    (decode-coding-string s coding-system)
-	  s)))))
+	(cond
+         ((equal "base64" data-encoding)
+          (if coding-system
+              (decode-coding-string (base64-decode-string s) coding-system)
+            s))
+         (t (if coding-system
+                (decode-coding-string
+                 (encode-coding-string
+                  s
+                  (car
+                   (process-coding-system (geben-session-process geben-current-session))))
+                 coding-system)
+              s)))))))
 
 
 (defcustom geben-temporary-file-directory (expand-file-name "geben" "~/.emacs.d")
@@ -2126,7 +2132,9 @@ The buffer commands are:
 (defsubst geben-context-property-format-array-name (property)
   "Format array element name in the debuggee language expression."
   (format "%s[%s]"
-	  (propertize (xml-get-attribute property 'name)
+	  (propertize (geben-dbgp-decode-string (xml-get-attribute property 'name)
+                                                nil
+                                                'utf-8)
 		      'face 'geben-context-variable-face)
 	  (propertize (xml-get-attribute property 'numchildren)
 		      'face 'geben-context-constant-face)))
@@ -2141,7 +2149,9 @@ The buffer commands are:
 	(geben-dbgp-decode-string (xml-node-children node)
 				  (xml-get-attribute node 'encoding)
 				  'utf-8)
-      (xml-get-attribute property sym))))
+      (geben-dbgp-decode-string (xml-get-attribute property sym)
+                                nil
+                                'utf-8))))
 
 (defsubst geben-context-property-name (property)
   "Get name attribute value from PROPERTY."
@@ -2974,14 +2984,18 @@ and call `geben-dbgp-entry' with each chunk."
 	      (run-hook-with-args 'geben-dbgp-continuous-command-hook session)
 	    (geben-dbgp-command-step-into session)))))))
 
-;; features
+(defun geben-dbgp-set-process-coding (session cmd msg err)
+  (let ((encoding (intern (cadr (cdr msg)))))
+    (set-process-coding-system (geben-session-process session) encoding encoding)))
 
+;; features
 (defcustom geben-dbgp-feature-list
   '((:set max_data 32768)
     (:set max_depth 1)
     (:set max_children 32)
     (:get breakpoint_types geben-dbgp-breakpoint-store-types)
-    (:set multiple_sessions 1))
+    (:set multiple_sessions 1)
+    (:get encoding geben-dbgp-set-process-coding))
   "*Specifies set of feature variables for each new debugging session.
 Each entry forms a list (METHOD FEATURE_NAME VALUE_OR_CALLBACK).
 METHOD is either `:get' or `:set'.

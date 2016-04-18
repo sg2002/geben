@@ -26,10 +26,12 @@
 
 (require 'dbgpe)
 
-(defun geben-test-dbgpe-index-php ()
+(defun geben-test-dbgpe-generic (&optional context)
   "Connects to php/generic.php, which is very basic php file for testing."
-  (dbgpe-connect (concat (geben-test-get-test-directory) "php/generic.php")
-                 '((property ((name . "$x")(fullanem . "$x")(type . "uninitialized"))))))
+  (let ((default-context '((property ((name . "$x")(fullname . "$x")
+                                      (type . "uninitialized"))))))
+      (dbgpe-connect (concat (geben-test-get-test-directory) "php/generic.php")
+                     (if context context default-context))))
 
 (defun geben-test-fixture (body)
   (unwind-protect
@@ -40,14 +42,60 @@
     (geben 64)))
 
 ;; * Tests
-(ert-deftest geben-test-show-context ()
+(ert-deftest geben-test-context ()
   "Tests whether it's possible to show context window."
   (geben-test-fixture
    (lambda ()
-     (geben-test-dbgpe-index-php)
+     (geben-test-dbgpe-generic)
      (sit-for 3)
      (geben-where)
      (geben-display-context))))
+
+(defun buffer-contains-substring (string)
+  (save-excursion
+    (save-match-data
+      (goto-char (point-min))
+      (search-forward string nil t)
+      (search-forward string nil t))))
+
+(defun geben-test-dbgpe-context-unicode ()
+  "Connects to php/generic.php, which is very basic php file for testing."
+  (let ((array-name (encode-coding-string
+                    (decode-coding-string "$массив" 'iso-8859-1) 'utf-8))
+        (array-key (encode-coding-string
+                    (decode-coding-string "ключ" 'iso-8859-1) 'utf-8)))
+    (geben-test-dbgpe-generic
+     `((property ((name . ,array-name)(fullname . ,array-name)(address . "92932256")
+                  (type . "array")(children . "1")(numchildren . "1")(page . "0")
+                  (pagesize . "32"))
+                 (property ((name . ,array-key)
+                            (fullname . ,(concat "$array[&apos;"
+                                                 array-key "&apos;]"))
+                            (type . "string")(size . "16")
+                            (encoding . "base64"))
+                           "0LfQvdCw0YfQtdC90LjQtQ=="))))))
+
+(ert-deftest geben-test-context-array-unicode-keys ()
+  "Geben used to freeze when you opened a context with an
+array that had unicode keys if the process coding system
+was utf-8. Also we check that both the key and value
+were decoded propertly."
+  (geben-test-fixture
+   (lambda ()
+     (geben-test-dbgpe-context-unicode)
+     (sit-for 3)
+     (geben-where)
+     (geben-display-context)
+     (save-excursion
+       (save-match-data
+         (goto-char (point-min))
+         (sit-for 1)
+         (widget-button-press (- (should (search-forward
+                                          "массив" nil t)) 9))
+         (should
+          (search-forward "ключ" nil t))
+         (should
+          (search-forward "значение" nil t)))))))
 
 (provide 'geben-test)
 ;;; geben-test.el ends here
