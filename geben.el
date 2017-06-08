@@ -125,7 +125,7 @@
   (with-current-buffer buf
     (symbol-value 'geben-dynamic-property-buffer-p)))
 
-(defun geben-set-next-window-buffer()
+(defun geben-set-next-window-buffer(buf)
   (let ((previous-buffer
          (window-buffer geben-source-window)))
     (set-window-buffer geben-source-window buf)
@@ -181,10 +181,10 @@
 
 (defun geben-dbgp-dynamic-property-buffer-visiblep ()
   "Check whether any window displays any property buffer."
-  (block walk-loop
+  (cl-block walk-loop
 	 (walk-windows (lambda (window)
 			 (if (geben-dbgp-dynamic-property-bufferp (window-buffer window))
-			   (return-from walk-loop t))))))
+			   (cl-return-from walk-loop t))))))
 
 
 ;;==============================================================
@@ -1033,10 +1033,10 @@ A source object forms a property list with three properties
 
 (defsubst geben-session-source-fileuri (session local-path)
   "Find a known fileuri that counters to LOCAL-PATH."
-  (block geben-session-souce-fileuri
+  (cl-block geben-session-souce-fileuri
     (maphash (lambda (fileuri path)
 	       (and (equal local-path (plist-get path :local-path))
-		    (return-from geben-session-souce-fileuri fileuri)))
+		    (cl-return-from geben-session-souce-fileuri fileuri)))
 	     (geben-session-source session))))
 
 (defsubst geben-session-source-content-coding-system (session content)
@@ -2723,9 +2723,10 @@ The buffer commands are:
   :group 'geben
   :type 'hook)
 
-(defcustom geben-dbgp-display-redirect-window nil
-  "Display redirected output window immediately after the end of execution"
-  :group 'geben)
+(defcustom geben-dbgp-display-redirect-buffer nil
+  "Display redirected output buffer immediately after the end of execution"
+  :group 'geben
+  :type 'boolean)
 
 (defun geben-session-redirect-init (session)
   (setf (geben-session-redirect session) (geben-redirect-make))
@@ -2809,7 +2810,7 @@ The buffer commands are:
 		   (geben-redirect-coding-system (geben-session-redirect session)))))
 	(goto-char (or save-pos
 		       (point-max))))
-      (when geben-dbgp-display-redirect-window
+      (when geben-dbgp-display-redirect-buffer
         (geben-dbgp-display-window buf)))))
 
 (defun geben-dbgp-command-stdout (session mode)
@@ -3593,8 +3594,8 @@ Key mapping and other information is described its help page."
   "Open a debugger server side file specified by FILEURI.
 FILEURI forms like as \`file:///path/to/file\'."
   (interactive (list (read-string "Open file: " "file://")))
-  (geben-with-current-session session
-    (geben-dbgp-command-source session fileuri)))
+  (let ((session (if session session geben-current-session)))
+    (when session (geben-dbgp-command-source session fileuri))))
 
 (defun geben-show-backtrace ()
   "Display backtrace list.
@@ -3670,7 +3671,6 @@ from \`redirect', \`intercept' and \`disabled'."
         (session (car geben-sessions)))
     (when (and file-path session)
       (geben-open-file (geben-source-fileuri session file-path) session))))
-
 
 (defcustom geben-dbgp-default-port 9000
   "Default port number to listen a new DBGp connection."
