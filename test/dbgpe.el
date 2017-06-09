@@ -23,10 +23,17 @@
 
 (defvar dbgpe-connection nil)
 
-(defvar dbgpe-filename nil)
+(defvar dbgpe-stack nil)
 
 (defun dbgpe-get-fileuri ()
-  (concat "file:///" dbgpe-filename))
+  (concat "file:///" (cdr (assoc 'filename (car dbgpe-stack)))))
+
+(defun dbgpe-get-lineno ()
+  (number-to-string (cdr (assoc 'lineno (car dbgpe-stack)))))
+
+(defun dbgpe-stack-step ()
+  (setq dbgpe-stack
+        (cdr dbgpe-stack)))
 
 (defvar dbgpe-context nil)
 
@@ -36,11 +43,11 @@
 
 (defvar dbgpe-encoding 'iso-8859-1)
 
-(defun dbgpe-init (fileuri)
+(defun dbgpe-init ()
   `((init
      ((xmlns . "urn:debugger_protocol_v1")
       (xmlns:xdebug . "http://xdebug.org/dbgp/xdebug")
-      (fileuri . ,dbgpe-filename)
+      (fileuri . ,(cdr (assoc 'filename (car dbgpe-stack))))
       (language . "PHP")
       (protocol_version . "1.0")
       (appid . "18408")
@@ -50,20 +57,20 @@
      (url nil "http://xdebug.org")
      (copyright nil "Copyright (c) 2002-2015 by Derick Rethans"))))
 
-(defun dbgpe-connect (filename context)
+(defun dbgpe-connect (stack context)
   (dbgpe-disconnect)
   (setq dbgpe-connection (open-network-stream "dbgpe" "*dbgpe*" "localhost" 9000))
   (set-process-filter dbgpe-connection 'dbgpe-process-filter)
-  (setq dbgpe-filename filename)
+  (setq dbgpe-stack stack)
   (setq dbgpe-context context)
   (setq dbgpe-status 'starting)
-  (dbgpe-send-string (dbgpe-build-string (dbgpe-to-xml (dbgpe-init filename)))))
+  (dbgpe-send-string (dbgpe-build-string (dbgpe-to-xml (dbgpe-init)))))
 
 (defun dbgpe-disconnect ()
   (when (bound-and-true-p dbgpe-connection)
     (delete-process dbgpe-connection)
     (setq dbgpe-transaction-id 30000)
-    (setq dbgpe-filename nil)
+    (setq dbgpe-stack nil)
     (setq dbgpe-context nil)))
 
 ;; * Command processing
@@ -185,6 +192,7 @@
                '(dbgpe-command-common-flag-parser) flags)))))
 
 (defun dbgpe-command-step-into (flags)
+  (dbgpe-stack-step)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "step_into")
@@ -192,19 +200,44 @@
                     (cons 'reason "ok"))
               (dbgpe-command-parse-flags
                '(dbgpe-command-common-flag-parser) flags))
-     (xdebug:message ((filename . ,(dbgpe-get-fileuri)) (lineno . "2"))))))
+     (xdebug:message ((filename . ,(dbgpe-get-fileuri))
+                      (lineno . ,(dbgpe-get-lineno)))))))
+
+(defun dbgpe-command-step-over (flags)
+  (dbgpe-stack-step)
+  `((response
+     ,(append (dbgpe-command-common)
+              (list (cons 'command "step_into")
+                    (cons 'status "break")
+                    (cons 'reason "ok"))
+              (dbgpe-command-parse-flags
+               '(dbgpe-command-common-flag-parser) flags))
+     (xdebug:message ((filename . ,(dbgpe-get-fileuri))
+                      (lineno . ,(dbgpe-get-lineno)))))))
+
 
 (defun dbgpe-command-stack-get (flags)
   (if (eq dbgpe-status 'stopped)
       (dbgpe-disconnect)
-
     `((response
        ,(append (dbgpe-command-common)
                 (list (cons 'command "stack_get"))
                 (dbgpe-command-parse-flags
                  '(dbgpe-command-common-flag-parser) flags))
        (stack ((where . "{main}")(level . "0")(type . "file")
-               (filename . ,(dbgpe-get-fileuri))(lineno . "2")))))))
+               (filename . ,(dbgpe-get-fileuri))
+               (lineno . ,(dbgpe-get-lineno))))))))
+
+(defun dbgpe-command-source-flag-parser (flags flag)
+  (pcase (car flag)
+    (`-f (base64-encode-string
+          (with-temp-buffer
+            (insert-file-contents
+             ;; Normally geben sends filename prefixed with file:///
+             ;; but geben-find-file uses file:// prefix.
+             (replace-regexp-in-string "file:[/]*" "" (cdr flag)))
+            (buffer-string))))
+    (_ nil)))
 
 (defun dbgpe-command-source (flags)
   `((response
@@ -213,9 +246,8 @@
                     (cons 'encoding "base64"))
               (dbgpe-command-parse-flags
                '(dbgpe-command-common-flag-parser) flags))
-     ,(base64-encode-string (with-temp-buffer
-         (insert-file-contents dbgpe-filename)
-         (buffer-string))))))
+     ,@(dbgpe-command-parse-flags
+       '(dbgpe-command-source-flag-parser) flags))))
 
 (defun dbgpe-command-context-flag-parser (flags flag)
   (pcase (car flag)
@@ -225,7 +257,6 @@
 (defun dbgpe-command-context-get (flags)
   (if (eq dbgpe-status 'stopped)
       (dbgpe-disconnect)
-
     `((response
        ,(append (dbgpe-command-common)
                 (list (cons 'command "context_get"))
@@ -233,7 +264,6 @@
                  '(dbgpe-command-common-flag-parser
                    dbgpe-command-context-flag-parser) flags))
        ,@dbgpe-context))))
-
 
 (defun dbgpe-command-run (flags)
   `((response

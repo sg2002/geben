@@ -26,11 +26,23 @@
 
 (require 'dbgpe)
 
-(defun geben-test-dbgpe-generic (&optional context)
+(defun geben-test-dbgpe-generic (&optional stack context)
   "Connects to php/generic.php, which is very basic php file for testing."
   (let ((default-context '((property ((name . "$x")(fullname . "$x")
-                                      (type . "uninitialized"))))))
-      (dbgpe-connect (concat (geben-test-get-test-directory) "php/generic.php")
+                                      (type . "uninitialized")))))
+        (default-stack `(((filename . ,(concat (geben-test-get-test-directory)
+                                             "php/generic.php"))
+                          (lineno . 1))
+                         ((filename . ,(concat (geben-test-get-test-directory)
+                                             "php/generic.php"))
+                          (lineno . 1))
+                         ((filename . ,(concat (geben-test-get-test-directory)
+                                             "php/generic-fns.php"))
+                          (lineno . 1))
+                         ((filename . ,(concat (geben-test-get-test-directory)
+                                             "php/generic.php"))
+                          (lineno . 1)))))
+      (dbgpe-connect (if stack stack default-stack)
                      (if context context default-context))))
 
 (defun geben-test-fixture (body)
@@ -65,6 +77,7 @@
         (array-key (encode-coding-string
                     (decode-coding-string "ключ" 'iso-8859-1) 'utf-8)))
     (geben-test-dbgpe-generic
+     nil
      `((property ((name . ,array-name)(fullname . ,array-name)(address . "92932256")
                   (type . "array")(children . "1")(numchildren . "1")(page . "0")
                   (pagesize . "32"))
@@ -83,19 +96,63 @@ were decoded propertly."
   (geben-test-fixture
    (lambda ()
      (geben-test-dbgpe-context-unicode)
-     (sit-for 3)
+     (sleep-for 1)
      (geben-where)
+     (sleep-for 1)
      (geben-display-context)
+     (sleep-for 1)
      (save-excursion
        (save-match-data
          (goto-char (point-min))
-         (sit-for 1)
          (widget-button-press (- (should (search-forward
                                           "массив" nil t)) 9))
          (should
           (search-forward "ключ" nil t))
          (should
           (search-forward "значение" nil t)))))))
+
+(ert-deftest geben-test-find-this-file ()
+  "Check whether geben-find-this-file works."
+  (geben-test-fixture
+   (lambda ()
+     ;; We create multiple windows since the default
+     ;; fallback logic is capable of switching to buffer
+     ;; in the single existing window, but
+     ;; this won't help when there's more than 1 window
+     (split-window-right)
+     (geben-test-dbgpe-generic)
+     (sleep-for 1)
+     (find-file (concat (geben-test-get-test-directory)
+                        "php/generic-fns.php"))
+     (let ((window (selected-window)))
+       (geben-find-this-file)
+       (sleep-for 1)
+       (should (equal (file-name-base (buffer-file-name (window-buffer window))) "generic-fns"))
+       (with-current-buffer (window-buffer window)
+         (should geben-mode))))))
+
+
+(ert-deftest geben-test-window-replace-when-session-moves ()
+  "Check the ability to replace the current debug buffer with buffer
+containing the new session position, when the session moves."
+  (geben-test-fixture
+   (lambda ()
+     ;; We create multiple windows since the default
+     ;; fallback logic is capable of switching to buffer
+     ;; in the single existing window, but
+     ;; this won't help when there's more than 1 window
+     (split-window-right)
+     (geben-test-dbgpe-generic)
+     (sleep-for 1)
+     (with-current-buffer (window-buffer (selected-window))
+       (geben-step-into)
+       (sleep-for 1)
+       (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic-fns"))
+       (should geben-mode)
+       (geben-step-over)
+       (sleep-for 1)
+       (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic"))
+       (should geben-mode)))))
 
 (provide 'geben-test)
 ;;; geben-test.el ends here
