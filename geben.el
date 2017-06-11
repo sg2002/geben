@@ -114,65 +114,119 @@
 
 (defvar geben-dynamic-property-buffer-p nil)
 
-(defvar geben-source-window nil)
-
-(defcustom geben-replace-source-buffers 'nil
-  "*Replace the previous buffer stopped at a breakpoint with a new one."
+(defcustom geben-pop-buffers-in-session nil
+  "*Pop new windows for buffers when a window with current session is visible.
+If at least a single window with some session is visible, and display of
+another buffer that has the same session is requested, the new buffer would
+get popped if t. If nil the session window would get switched to it."
   :group 'geben
   :type 'boolean)
+
+(defcustom geben-pop-buffers-for-new-session nil
+  "*Pop new windows for buffers when no window with current session is visible."
+  :group 'geben
+  :type 'boolean)
+
+(defcustom geben-replace-other-session-buffers nil
+  "*Replace buffers for other sessions.
+If geben-pop-buffers-for-new-session is nil and geben buffer with a different
+session is visible replace it.  When set to nil set the new buffer as the
+next buffer for that window."
+  :group 'geben
+  :type 'boolean)
+
 
 (defsubst geben-dbgp-dynamic-property-bufferp (buf)
   (with-current-buffer buf
     (symbol-value 'geben-dynamic-property-buffer-p)))
 
-(defun geben-set-next-window-buffer(buf)
+(defun geben-set-next-window-buffer(window buf)
+  "Set the buffer BUF as the next buffer for WINDOW."
   (let ((previous-buffer
-         (window-buffer geben-source-window)))
-    (set-window-buffer geben-source-window buf)
-    (set-window-buffer geben-source-window previous-buffer)))
+         (window-buffer window)))
+    (set-window-buffer window buf)
+    (set-window-buffer window previous-buffer))
+  t)
 
 (defun geben-dbgp-display-window (buf)
   "Display a buffer anywhere in a window, depends on the circumstance."
-  (cond
-   ((and (buffer-file-name (window-buffer))
-         (buffer-file-name buf)
-         (string=(file-name-nondirectory (buffer-file-name buf))
-                 (file-name-nondirectory (buffer-file-name (window-buffer)))))
-    (switch-to-buffer buf))
-   ((get-buffer-window buf)
-    (select-window (get-buffer-window buf))
-    (switch-to-buffer buf))
-   ((and (not (geben-dbgp-dynamic-property-buffer-visiblep))
-         (geben-dbgp-dynamic-property-bufferp buf))
+  (or
+   (when (not (buffer-file-name buf))
+     (pop-to-buffer buf))
+   (when (geben-dbgp-buffer-is-debug-for-current-file buf)
+     (switch-to-buffer buf))
+   (let ((window (geben-dbgp-find-session-window buf)))
+     (when window
+       (cond
+        ((or (not geben-pop-buffers-in-session)
+             (geben-dbgp-cursor-position-for-session-is-in-buffer buf))
+         (select-window window)
+         (switch-to-buffer buf))
+        (t
+         (pop-to-buffer buf)))))
+   (let ((window (geben-dbgp-find-geben-window)))
+     (when window
+       (cond
+        (geben-pop-buffers-for-new-session
          (pop-to-buffer buf))
-   ((or (> (count-windows) 1)
-	(geben-dbgp-dynamic-property-buffer-visiblep))
-    (pop-to-buffer buf)
-    (setq geben-source-window (get-buffer-window buf)))
-   ((and (window-live-p geben-source-window)
-         geben-replace-source-buffers)
-    (geben-set-next-window-buffer buf))
-   ((window-live-p geben-source-window)
-    (geben-set-next-window-buffer buf))
-   (t
-    (let ((candidates (make-vector 3 nil))
-	  (dynamic-p (geben-dbgp-dynamic-property-bufferp buf)))
-      (block finder
-        (walk-windows (lambda (window)
-                        (if (geben-dbgp-dynamic-property-bufferp (window-buffer window))
-                            (if dynamic-p
-                                (unless (aref candidates 1)
-                                  (aset candidates 1 window)))
-                          (if (eq (selected-window) window)
-                              (aset candidates 2 window)
-                            (aset candidates 0 window)
-                            (return-from finder))))))
-      (select-window (or (aref candidates 0)
-			 (aref candidates 1)
-			 (aref candidates 2)
-			 (selected-window)))
-      (switch-to-buffer buf))))
-  buf)
+        (geben-replace-other-session-buffers
+         (select-window window)
+         (switch-to-buffer buf))
+        (t
+         (geben-set-next-window-buffer window buf)))))
+   (cond
+    (geben-pop-buffers-for-new-session
+     (pop-to-buffer buf))
+    (t
+     (switch-to-buffer buf)))
+   buf))
+
+(defun geben-dbgp-buffer-is-debug-for-current-file (buf)
+  "Check whether the currently oppened buffer is for the same file as BUF."
+  (if (and (buffer-file-name (window-buffer))
+           (buffer-file-name buf)
+           (string=(file-name-nondirectory (buffer-file-name buf))
+                   (file-name-nondirectory (buffer-file-name (window-buffer)))))
+      t
+    nil))
+
+(defun geben-dbgp-cursor-position-for-session-is-in-buffer (buf)
+  "Check whether buffer BUF contains the current cursor position for its session."
+  (and
+   (buffer-file-name buf)
+   (string=
+    (let ((session (with-current-buffer buf geben-current-session)))
+      (file-name-nondirectory
+       (geben-source-local-path-in-server
+        session
+        (car (plist-get (geben-session-cursor
+                         session) :position)))))
+    (file-name-nondirectory (buffer-file-name buf)))))
+
+(defun geben-dbgp-find-session-window (buf)
+  "Return window that has the same geben session as BUF if there is one."
+  (cl-block finder
+    (get-window-with-predicate
+     (lambda (w) (if (geben-dbgp-buffer-has-the-same-session-as-window
+                      buf w)
+                     t
+                   nil)))))
+
+(defun geben-dbgp-buffer-has-the-same-session-as-window(buf &optional window)
+  "Check wheteher buffer BUF has the same session as buffer in WINDOW."
+  (if (equal
+       (with-current-buffer (if window
+                                (window-buffer window)
+                              (window-buffer)) geben-current-session)
+       (with-current-buffer buf geben-current-session))
+      t
+    nil))
+
+(defun geben-dbgp-find-geben-window ()
+  "Return window that has geben-mode if there's one."
+  (get-window-with-predicate (lambda (w)
+                               (with-current-buffer (window-buffer w)
+                                     geben-mode))))
 
 ;;  (when (buffer-live-p buf)
 ;;    (or (eq buf (get-buffer geben-context-buffer-name))

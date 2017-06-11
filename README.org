@@ -119,12 +119,14 @@ Here is an illustration on PHP debugging.
    To quit GEBEN, type: M-x geben-end
 
 ** What's new
-- Multi-session debugging is enabled by default.
+- Saner window management was implemented. GEBEN no longer pops so many buffers.
+- Multi-session debugging is enabled by default. Currently this only works when the dbgp proxy is used.
 - Calling geben-where outside of a geben session jumps to the first open session.
 - Calling geben-where within a buffer with the current breakpoint jumps to the next open session.
 - The output window is no longer popped every time after execution. This is controlled by a new custom geben-dbgp-display-redirect-window.
 - New function geben-find-this-file. When geben session is active, executing this function opens the current file in the debug mode.
 - GEBEN no longer breaks network connectivity in packages like erc.
+- There are unit tests now. Dummy dbgp engine was implemented to help with unit testing.
 ** Support
 
 Geben was orignally hosted on Google Code. Since it was closed, the official repository seems to be [[https://github.com/pokehanai/geben-on-emacs][this]].

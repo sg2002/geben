@@ -45,23 +45,41 @@
       (dbgpe-connect (if stack stack default-stack)
                      (if context context default-context))))
 
+(defvar geben-test-preserved-variables
+  '(geben-pop-buffers-in-session
+    geben-pop-buffers-for-new-session))
+
+(defun geben-test-preserve-variable-values ()
+  (mapcar (lambda (v) (cons v (symbol-value v))) geben-test-preserved-variables))
+
+(defun geben-test-restore-preserved-variables (vars)
+  (dolist (elt vars)
+    (set (car elt) (cdr elt))))
+
 (defun geben-test-fixture (body)
-  (unwind-protect
-      (progn (geben 1)
-             (funcall body))
-    (geben-where)
-    (geben-run)
-    (geben 64)))
+  (let ((vars (geben-test-preserve-variable-values)))
+      (unwind-protect
+          (progn (geben 1)
+                 (funcall body))
+        (geben-where)
+        (geben-run)
+        (geben 64)
+        (geben-test-restore-preserved-variables vars))))
 
 ;; * Tests
 (ert-deftest geben-test-context ()
-  "Tests whether it's possible to show context window."
+  "Test whether it's possible to show context window. Also
+ensure that it's displayed in separate window."
   (geben-test-fixture
    (lambda ()
+     (setq geben-pop-buffers-in-session nil)
      (geben-test-dbgpe-generic)
-     (sit-for 3)
-     (geben-where)
-     (geben-display-context))))
+     (sit-for 2)
+     (let ((window (selected-window)))
+       (with-current-buffer (window-buffer (selected-window))
+         (geben-display-context))
+       (sit-for 1)
+       (should (not (equal window (selected-window))))))))
 
 (defun buffer-contains-substring (string)
   (save-excursion
@@ -115,11 +133,7 @@ were decoded propertly."
   "Check whether geben-find-this-file works."
   (geben-test-fixture
    (lambda ()
-     ;; We create multiple windows since the default
-     ;; fallback logic is capable of switching to buffer
-     ;; in the single existing window, but
-     ;; this won't help when there's more than 1 window
-     (split-window-right)
+     (setq geben-pop-buffers-for-new-session t)
      (geben-test-dbgpe-generic)
      (sleep-for 1)
      (find-file (concat (geben-test-get-test-directory)
@@ -132,27 +146,74 @@ were decoded propertly."
          (should geben-mode))))))
 
 
-(ert-deftest geben-test-window-replace-when-session-moves ()
+(ert-deftest geben-test-buffer-replace-when-session-moves ()
   "Check the ability to replace the current debug buffer with buffer
 containing the new session position, when the session moves."
   (geben-test-fixture
    (lambda ()
-     ;; We create multiple windows since the default
-     ;; fallback logic is capable of switching to buffer
-     ;; in the single existing window, but
-     ;; this won't help when there's more than 1 window
-     (split-window-right)
+     (setq geben-pop-buffers-in-session t)
      (geben-test-dbgpe-generic)
      (sleep-for 1)
-     (with-current-buffer (window-buffer (selected-window))
-       (geben-step-into)
+     (let ((window (selected-window)))
+       (with-current-buffer (window-buffer (selected-window))
+         (geben-step-into))
        (sleep-for 1)
+       (should (equal window (selected-window)))
        (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic-fns"))
-       (should geben-mode)
-       (geben-step-over)
+       (with-current-buffer (window-buffer (selected-window))
+         (geben-step-over))
        (sleep-for 1)
+       (should (equal window (selected-window)))
        (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic"))
-       (should geben-mode)))))
+       (with-current-buffer (window-buffer (selected-window)) (should geben-mode))))))
+
+(ert-deftest geben-test-pop-buffers-in-session ()
+  "Check the ability to pop a new buffer for the same session
+when geben-pop-buffers-in-session is set to t"
+  (geben-test-fixture
+   (lambda ()
+     (setq geben-pop-buffers-in-session t)
+     (geben-test-dbgpe-generic)
+     (sleep-for 1)
+     (let ((window (selected-window)))
+      (with-current-buffer (window-buffer window)
+        (geben-with-current-session session
+          (geben-open-file
+           (geben-source-fileuri
+            session
+            (file-truename
+             (concat (geben-test-get-test-directory)
+                     "php/generic-fns.php")))))
+        (sleep-for 1)
+        (should (not (equal window (selected-window))))
+        (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic-fns"))
+        (with-current-buffer (window-buffer (selected-window)) (should geben-mode)))))))
+
+(ert-deftest geben-test-pop-buffers-for-new-session ()
+  "Check the ability to pop a new buffer for a new session
+when geben-pop-buffers-for-new-session is set to t"
+  (geben-test-fixture
+   (lambda ()
+     (setq geben-pop-buffers-for-new-session t)
+     (let ((window (selected-window)))
+       (geben-test-dbgpe-generic)
+       (sleep-for 1)
+       (should (not (equal window (selected-window))))
+       (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic"))
+       (with-current-buffer (window-buffer (selected-window)) (should geben-mode))))))
+
+(ert-deftest geben-test-dont-pop-buffers-for-new-session ()
+  "Check the ability to pop a new buffer for a new session
+when geben-pop-buffers-for-new-session is set to nil"
+  (geben-test-fixture
+   (lambda ()
+     (setq geben-pop-buffers-for-new-session nil)
+     (let ((window (selected-window)))
+       (geben-test-dbgpe-generic)
+       (sleep-for 1)
+       (should (equal window (selected-window)))
+       (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic"))
+       (with-current-buffer (window-buffer (selected-window)) (should geben-mode))))))
 
 (provide 'geben-test)
 ;;; geben-test.el ends here
