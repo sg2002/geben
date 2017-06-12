@@ -39,7 +39,7 @@
     (error (concat "geben.el: This package requires Emacs 22.1 or later."))))
 
 (eval-and-compile
-  (require 'cl)
+  (require 'cl-lib)
   (require 'xml))
 
 (require 'comint)
@@ -140,10 +140,10 @@ to connect to DBGp listener of this address."
   )
 
 (defsubst dbgp-ip-get (proc)
-  (first (process-contact proc)))
+  (cl-first (process-contact proc)))
 
 (defsubst dbgp-port-get (proc)
-  (second (process-contact proc)))
+  (cl-second (process-contact proc)))
 
 (defsubst dbgp-proxy-p (proc)
   (and (dbgp-plist-get proc :proxy)
@@ -257,7 +257,7 @@ Fourth arg DEFAULT-VALUE is the default value.  If non-nil, it is used
 "
   (let (str
 	(temp-history (and history
-			   (copy-list (symbol-value history)))))
+			   (cl-copy-list (symbol-value history)))))
     (while
 	(progn
 	  (setq str (read-string prompt initial-input 'temp-history default-value))
@@ -302,8 +302,8 @@ See `read-from-minibuffer' for details of HISTORY argument."
 ;;--------------------------------------------------------------
 
 (defsubst dbgp-listener-find (port)
-  (find-if (lambda (listener)
-	     (eq port (second (process-contact listener))))
+  (cl-find-if (lambda (listener)
+	     (eq port (cl-second (process-contact listener))))
 	   dbgp-listeners))
 
 ;;;###autoload
@@ -367,7 +367,7 @@ See `read-from-minibuffer' for details of HISTORY argument."
 		      (mapcar (lambda (listener)
 				(and (or current-prefix-arg
 					 (not (dbgp-proxy-p listener)))
-				     (number-to-string (second (process-contact listener)))))
+				     (number-to-string (cl-second (process-contact listener)))))
 			      dbgp-listeners))))
      (list
       ;; ask user for the target idekey.
@@ -433,9 +433,9 @@ associating with the IDEKEY."
 The proxy should be found at IP-OR-ADDR / PORT.
 This create a new DBGp listener and register it to the proxy
 associating with the IDEKEY."
-  (block dbgp-proxy-register-exec
+  (cl-block dbgp-proxy-register-exec
     ;; check whether the proxy listener already exists
-    (let ((listener (find-if (lambda (listener)
+    (let ((listener (cl-find-if (lambda (listener)
 			       (let ((proxy (dbgp-proxy-get listener)))
 				 (and proxy
 				      (equal ip-or-addr (plist-get proxy :addr))
@@ -443,7 +443,7 @@ associating with the IDEKEY."
 				      (equal idekey (plist-get proxy :idekey)))))
 			     dbgp-listeners)))
       (if listener
-	  (return-from dbgp-proxy-register-exec
+	  (cl-return-from dbgp-proxy-register-exec
 	    (cons listener
 		  (format "The DBGp proxy listener has already been started. idekey: %s" idekey)))))
 
@@ -457,7 +457,7 @@ associating with the IDEKEY."
 						:noquery t
 						:filter 'dbgp-comint-setup
 						:sentinel 'dbgp-listener-sentinel))
-	   (listener-port (second (process-contact listener-proc)))
+	   (listener-port (cl-second (process-contact listener-proc)))
 	   (result (dbgp-proxy-send-command ip-or-addr port
 					    (format "proxyinit -a %s:%s -k %s -m %d"
 						    dbgp-local-address listener-port idekey
@@ -475,7 +475,7 @@ associating with the IDEKEY."
 	;; connection failed or the proxy respond an error.
 	;; give up.
 	(dbgp-process-kill listener-proc)
-	(return-from dbgp-proxy-register-exec
+	(cl-return-from dbgp-proxy-register-exec
 	  (if (not (consp result))
 	      (cons result
 		    (cond
@@ -522,7 +522,7 @@ After unregistration, it kills the listener instance."
 				   (and (eq 1 (length idekeys))
 					(car idekeys))))
      ;; filter proxies and leave ones having the selected ideky.
-     (setq proxies (remove-if (lambda (proxy)
+     (setq proxies (cl-remove-if (lambda (proxy)
 				(not (equal idekey (plist-get (dbgp-proxy-get proxy) :idekey))))
 			      proxies))
      (let ((proxy (if (= 1 (length proxies))
@@ -535,7 +535,7 @@ After unregistration, it kills the listener instance."
 					      (format "%s:%s" (plist-get prop :addr) (plist-get prop :port))))
 					  proxies))
 			   (addr (completing-read "Proxy candidates: " addrs nil t (car addrs)))
-			   (pos (position addr addrs)))
+			   (pos (cl-position addr addrs)))
 		      (and pos
 			   (nth pos proxies))))))
        (list idekey
@@ -700,9 +700,9 @@ takes over the filter."
 
     (let* ((listener (dbgp-listener-get proc))
 	   (buffer-name (format "DBGp <%s:%s>"
-				(first (process-contact proc))
-				(second (process-contact listener))))
-	   (buf (or (find-if (lambda (buf)
+				(cl-first (process-contact proc))
+				(cl-second (process-contact listener))))
+	   (buf (or (cl-find-if (lambda (buf)
 			       ;; find reusable buffer
 			       (let ((proc (get-buffer-process buf)))
 				 (and (buffer-local-value 'dbgp-buffer-process buf)
@@ -782,9 +782,9 @@ takes over the filter."
 	(listener (dbgp-listener-get proc))
 	(session-filter (dbgp-plist-get proc :session-filter))
 	output process-window chunks)
-    (block dbgp-session-filter
+    (cl-block dbgp-session-filter
 	   (unless (buffer-live-p buf)
-	     (return-from dbgp-session-filter))
+	     (cl-return-from dbgp-session-filter))
 
 	   (with-current-buffer buf
 	     (when dbgp-filter-defer-flag
@@ -794,7 +794,7 @@ takes over the filter."
 		     dbgp-filter-pending-text (if dbgp-filter-pending-text
 						  (concat dbgp-filter-pending-text string)
 						string))
-	       (return-from dbgp-session-filter))
+	       (cl-return-from dbgp-session-filter))
 
 	     ;; If we have to ask a question during the processing,
 	     ;; defer any additional text that comes from the debugger
@@ -862,13 +862,13 @@ takes over the filter."
 	 chunks)
     (while (< i send)
       (if (< 0 (elt string i))
-	  (incf i)
+	  (cl-incf i)
 	(setq tlen (string-to-number (substring string lbeg i)))
 	(setq tbeg (1+ i))
 	(setq i (+ tbeg tlen))
 	(when (< i send)
 	  (setq chunks (cons (substring string tbeg i) chunks))
-	  (incf i)
+	  (cl-incf i)
 	  (setq lbeg i))))
     ;; Remove chunk from `dbgp-filter-pending-text'.
     (setq dbgp-filter-pending-text

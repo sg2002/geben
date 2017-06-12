@@ -19,6 +19,8 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;;; Code:
+(require 'geben)
+
 (defun geben-test-get-test-directory ()
   (concat (file-name-directory (locate-library "geben")) "test/"))
 
