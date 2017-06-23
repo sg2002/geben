@@ -1,6 +1,6 @@
 ;;; dbgpe.el --- DBGp engine implementation for testing.  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2016
+;; Copyright (C) 2016-2017
 
 ;; Author: sg2002 <sg2002@gmx.com>
 ;; Keywords: DBGp, debugger, PHP, Xdebug, Perl, Python, Ruby, Tcl, Komodo
@@ -81,9 +81,8 @@
         ,@(dbgpe-list-to-alist rest)))
     (_ nil)))
 
-(defun dbgpe-parse-command (command-string)
-  (let* ((command-split (split-string (substring command-string 0 (- (length command-string) 1))))
-         (command-name-dashed (replace-regexp-in-string "_" "-" (car command-split)))
+(defun dbgpe-parse-command (command-split)
+  (let* ((command-name-dashed (replace-regexp-in-string "_" "-" (car command-split)))
          (fn-name (intern (concat "dbgpe-command-" command-name-dashed))))
     (funcall fn-name (dbgpe-list-to-alist (cdr command-split)))))
 
@@ -100,13 +99,13 @@
 
 (defun dbgpe-process-filter (process string)
   ""
-  (let ((response (dbgpe-parse-command string)))
+  (let ((response (dbgpe-parse-command (split-string (substring string 0 (- (length string) 1))))))
     (when response
       (dbgpe-send-string (dbgpe-build-string (dbgpe-to-xml response))))))
 
 ;; * Commands
 (defun dbgpe-command-parse-flag (parsers flags flag)
-  (delq nil (mapcar (lambda (parser) (funcall parser flags flag)) parsers)))
+  (delq nil (apply 'append (mapcar (lambda (parser) (funcall parser flags flag)) parsers))))
 
 (defun dbgpe-command-parse-flags (parsers flags)
   (apply 'append (mapcar (apply-partially 'dbgpe-command-parse-flag parsers flags) flags)))
@@ -114,13 +113,13 @@
 (defun dbgpe-command-common-flag-parser (flags flag)
   (pcase (car flag)
     (`-i (progn (setq dbgpe-transaction-id (cdr flag))
-                (cons 'transaction_id (cdr flag))))
+                `((transaction_id . ,(cdr flag)))))
     (_ nil)))
 
 (defun dbgpe-command-feature-set-flag-parser (flags flag)
   (pcase (car flag)
-    (`-n (cons 'feature (cdr flag)))
-    (`-v (cons 'success "1"))
+    (`-n `((feature . ,(cdr flag))))
+    (`-v `((success . "1")))
     (_ nil)))
 
 (defun dbgpe-command-common ()
@@ -148,7 +147,7 @@
 
 (defun dbgpe-command-feature-stdout-flag-parser (flags flag)
   (pcase (car flag)
-    (`-c (cons 'success "1"))
+    (`-c `((success . "1")))
     (_ nil)))
 
 (defun dbgpe-command-stdout (flags)
@@ -161,7 +160,7 @@
 
 (defun dbgpe-command-stderr-flag-parser (flags flag)
   (pcase (car flag)
-    (`-c (cons 'success "0"))
+    (`-c `((success . "0")))
     (_ nil)))
 
 (defun dbgpe-command-stderr (flags)
@@ -230,13 +229,14 @@
 
 (defun dbgpe-command-source-flag-parser (flags flag)
   (pcase (car flag)
-    (`-f (base64-encode-string
-          (with-temp-buffer
-            (insert-file-contents
-             ;; Normally geben sends filename prefixed with file:///
-             ;; but geben-find-file uses file:// prefix.
-             (replace-regexp-in-string "file:[/]*" "" (cdr flag)))
-            (buffer-string))))
+    (`-f (list
+          (base64-encode-string
+           (with-temp-buffer
+             (insert-file-contents
+              ;; Normally geben sends filename prefixed with file:///
+              ;; but geben-find-file uses file:// prefix.
+              (replace-regexp-in-string "file:[/]*" "" (cdr flag)))
+             (buffer-string)))))
     (_ nil)))
 
 (defun dbgpe-command-source (flags)
@@ -251,7 +251,7 @@
 
 (defun dbgpe-command-context-flag-parser (flags flag)
   (pcase (car flag)
-    (`-c (cons 'context (cdr flag)))
+    (`-c `((context . ,(cdr flag))))
     (_ nil)))
 
 (defun dbgpe-command-context-get (flags)
@@ -283,6 +283,129 @@
                     (cons 'reason "ok"))
               (dbgpe-command-parse-flags
                '(dbgpe-command-common-flag-parser) flags)))))
+
+;; * DBGPE proxy
+;; ** Debugger side
+(defvar dbgpe-proxy-debugger-listener nil)
+
+(defvar dbgpe-proxy-debugger-listener-port 9001)
+
+(defvar dbgpe-proxy-debuggers ())
+
+(defun dbgpe-proxy-debugger-init-process-filter (process string)
+  (let ((response (dbgpe-parse-command (split-string string))))
+    (when response
+      (process-send-string process (concat "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                                           (dbgpe-to-xml response)))))
+  (delete-process process))
+
+(defun dbgpe-command-proxyinit-flag-parser (flags flag)
+  (pcase (car flag)
+    (`-k `((idekey . ,(cdr flag))))
+    (`-a `((address . ,(car (split-string (cdr flag) ":")))
+           (port . ,(cadr (split-string (cdr flag) ":")))))
+    (_ nil)))
+
+(defun dbgpe-proxy-reply (flags)
+  `((proxyinit ((success . "1")
+                 ,@(dbgpe-command-parse-flags
+                    '(dbgpe-command-proxyinit-flag-parser) flags)))))
+
+(defun dbgpe-command-proxyinit (flags)
+  (add-to-list 'dbgpe-proxy-debuggers
+               `(,(cdr (assoc '-k flags)) .
+                 ((address ,(car (split-string (cdr (assoc '-a flags)) ":")))
+                  (port ,(cadr (split-string (cdr (assoc '-a flags)) ":"))))))
+  (dbgpe-proxy-reply flags))
+
+(defun dbgpe-command-proxystop (flags)
+  (setq dbgpe-proxy-debuggers
+        (delq (assoc (cdr (assoc '-k flags)) dbgpe-proxy-debuggers)
+              dbgpe-proxy-debuggers))
+  (dbgpe-proxy-reply flags))
+
+;; ** Engine side
+(defvar dbgpe-proxy-processes ())
+
+(defvar dbgpe-proxy-engine-listener nil)
+
+(defvar dbgpe-proxy-engine-listener-port 9000)
+
+(defun dbgpe-proxy-engine-sentinel (process event)
+  (when (not (process-live-p process))
+    (when (process-live-p (cdr (assoc process dbgpe-proxy-processes)))
+      (delete-process (cdr (assoc process dbgpe-proxy-processes))))
+    (setq dbgpe-proxy-processes (delq (assoc process dbgpe-proxy-processes) dbgpe-proxy-processes))))
+
+(defun dbgpe-proxy-debugger-sentinel (process event)
+  (when (not (process-live-p process))
+    (when (process-live-p (cdr (rassoc process dbgpe-proxy-processes)))
+      (delete-process (cdr (rassoc process dbgpe-proxy-processes))))
+    (setq dbgpe-proxy-processes (delq (rassoc process dbgpe-proxy-processes) dbgpe-proxy-processes))))
+
+(defun dbgpe-proxy-engine-process-filter (process string)
+  (if (assoc process dbgpe-proxy-processes)
+      (process-send-string (cdr (assoc process dbgpe-proxy-processes)) string))
+  (dbgpe-proxy-create-process process string))
+
+(defun dbgpe-proxy-debugger-process-filter (process string)
+  (process-send-string (car (rassoc process dbgpe-proxy-processes)) string))
+
+(defun dbgpe-proxy-create-process (engine-process init)
+  (let* ((xml (with-temp-buffer
+             (insert init)
+             (xml-parse-region)))
+         (idekey (cdr (assoc 'idekey (car (cdr (car xml))))))
+         (debugger (cdr (assoc idekey dbgpe-proxy-debuggers)))
+         (debugger-process
+          (if debugger
+              (make-network-process
+               :name "dbgpe-proxy-debugger-process"
+               :host (cadr (assoc 'address
+                                  debugger))
+               :service (string-to-number
+                         (cadr (assoc 'port debugger)))
+               :sentinel 'dbgpe-proxy-debugger-sentinel
+               :filter 'dbgpe-proxy-debugger-process-filter)
+            nil)))
+    (when debugger-process
+      (add-to-list 'dbgpe-proxy-processes
+                   (cons engine-process debugger-process))
+      (process-send-string
+       debugger-process
+       (dbgpe-build-string
+        (dbgpe-to-xml
+         (cons
+          (cons
+           (car (car xml))
+           (cons
+            (cons
+             (cons 'proxied (car (process-contact engine-process)))
+             (car (cdr (car xml))))
+            (cdr (cdr (car xml)))))
+          (cdr xml))))))))
+
+;; ** Control
+(defun dbgpe-proxy-start ()
+  (setq dbgpe-proxy-engine-listener
+        (make-network-process :name "dbgpe-proxy-engine-listener"
+                              :server t
+                              :service dbgpe-proxy-engine-listener-port
+                              :sentinel 'dbgpe-proxy-engine-sentinel
+                              :filter 'dbgpe-proxy-engine-process-filter)
+        dbgpe-proxy-debugger-listener
+        (make-network-process :name "dbgpe-proxy-debugger-listener"
+                              :server t
+                              :service dbgpe-proxy-debugger-listener-port
+                              :filter 'dbgpe-proxy-debugger-init-process-filter)))
+
+(defun dbgpe-proxy-stop ()
+  (delete-process dbgpe-proxy-engine-listener)
+  (delete-process dbgpe-proxy-debugger-listener)
+  (setq dbgpe-proxy-debuggers ())
+  (mapc (lambda (elt) (delete-process (car elt))
+          (delete-process (cdr elt))) dbgpe-proxy-processes)
+  (setq dbgpe-proxy-processes ()))
 
 (provide 'dbgpe)
 ;;; dbgpe.el ends here
