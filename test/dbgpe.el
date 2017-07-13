@@ -21,33 +21,30 @@
 
 ;;; Code:
 
-(defvar dbgpe-connection nil)
+(defvar dbgpe-sessions '())
 
-(defvar dbgpe-stack nil)
+(defun dbgpe-get-fileuri (session-id)
+  (concat "file:///" (cdr (assoc 'filename (car (cdr (assq 'stack (assq session-id dbgpe-sessions))))))))
 
-(defun dbgpe-get-fileuri ()
-  (concat "file:///" (cdr (assoc 'filename (car dbgpe-stack)))))
+(defun dbgpe-get-lineno (session-id)
+  (number-to-string (cdr (assoc 'lineno (car (cdr (assq 'stack (assq session-id dbgpe-sessions))))))))
 
-(defun dbgpe-get-lineno ()
-  (number-to-string (cdr (assoc 'lineno (car dbgpe-stack)))))
-
-(defun dbgpe-stack-step ()
-  (setq dbgpe-stack
-        (cdr dbgpe-stack)))
-
-(defvar dbgpe-context nil)
-
-(defvar dbgpe-transaction-id 30000)
-
-(defvar dbgpe-status 'starting)
+(defun dbgpe-stack-step (session-id)
+  (push (cons
+         session-id
+         (cons
+          (cons 'stack
+                (cdr (cdr (assq 'stack (assq session-id dbgpe-sessions)))))
+          (assq session-id dbgpe-sessions)))
+        dbgpe-sessions))
 
 (defvar dbgpe-encoding 'iso-8859-1)
 
-(defun dbgpe-init ()
+(defun dbgpe-init (session)
   `((init
      ((xmlns . "urn:debugger_protocol_v1")
       (xmlns:xdebug . "http://xdebug.org/dbgp/xdebug")
-      (fileuri . ,(cdr (assoc 'filename (car dbgpe-stack))))
+      (fileuri . ,(cdr (assoc 'filename (car (cdr (assq 'stack session))))))
       (language . "PHP")
       (protocol_version . "1.0")
       (appid . "18408")
@@ -58,20 +55,32 @@
      (copyright nil "Copyright (c) 2002-2015 by Derick Rethans"))))
 
 (defun dbgpe-connect (stack context)
-  (dbgpe-disconnect)
-  (setq dbgpe-connection (open-network-stream "dbgpe" "*dbgpe*" "localhost" 9000))
-  (set-process-filter dbgpe-connection 'dbgpe-process-filter)
-  (setq dbgpe-stack stack)
-  (setq dbgpe-context context)
-  (setq dbgpe-status 'starting)
-  (dbgpe-send-string (dbgpe-build-string (dbgpe-to-xml (dbgpe-init)))))
+  (let* ((connection (open-network-stream "dbgpe" "*dbgpe*" "localhost" 9000))
+         (session `((stack . ,stack)
+                    (context . ,context)
+                    (status 'starting))))
+    (push (cons connection session) dbgpe-sessions)
+    (fset
+     'dbgpe-process-filter
+     (lambda (process string)
+       (let ((response (dbgpe-parse-command
+                        connection
+                        (split-string (substring string 0 (- (length string) 1))))))
+         (when response
+           (dbgpe-send-string process (dbgpe-build-string (dbgpe-to-xml response)))))))
+    (set-process-filter connection 'dbgpe-process-filter)
+    (dbgpe-send-string connection (dbgpe-build-string (dbgpe-to-xml (dbgpe-init session))))
+    connection))
 
-(defun dbgpe-disconnect ()
-  (when (bound-and-true-p dbgpe-connection)
-    (delete-process dbgpe-connection)
-    (setq dbgpe-transaction-id 30000)
-    (setq dbgpe-stack nil)
-    (setq dbgpe-context nil)))
+(defun dbgpe-sentinel (process event)
+  (when (equal event "connection broken by remote peer\n")
+    (assq-delete-all process dbgpe-sessions)
+    (delete-process process)))
+
+
+(defun dbgpe-disconnect (connection)
+  (delete-process connection)
+  (assq-delete-all connection dbgpe-sessions))
 
 ;; * Command processing
 (defun dbgpe-list-to-alist (list)
@@ -81,10 +90,10 @@
         ,@(dbgpe-list-to-alist rest)))
     (_ nil)))
 
-(defun dbgpe-parse-command (command-split)
+(defun dbgpe-parse-command (session-id command-split)
   (let* ((command-name-dashed (replace-regexp-in-string "_" "-" (car command-split)))
          (fn-name (intern (concat "dbgpe-command-" command-name-dashed))))
-    (funcall fn-name (dbgpe-list-to-alist (cdr command-split)))))
+    (funcall fn-name session-id (dbgpe-list-to-alist (cdr command-split)))))
 
 (defun dbgpe-to-xml(form)
   (with-temp-buffer
@@ -94,29 +103,25 @@
 (defun dbgpe-build-string (xml)
   (concat (number-to-string (length xml)) "\0" xml "\0"))
 
-(defun dbgpe-send-string(string)
-  (process-send-string dbgpe-connection string))
-
-(defun dbgpe-process-filter (process string)
-  ""
-  (let ((response (dbgpe-parse-command (split-string (substring string 0 (- (length string) 1))))))
-    (when response
-      (dbgpe-send-string (dbgpe-build-string (dbgpe-to-xml response))))))
+(defun dbgpe-send-string(process string)
+  (process-send-string process string))
 
 ;; * Commands
-(defun dbgpe-command-parse-flag (parsers flags flag)
-  (delq nil (apply 'append (mapcar (lambda (parser) (funcall parser flags flag)) parsers))))
+(defun dbgpe-command-parse-flag (session-id parsers flags flag)
+  (delq nil (apply 'append (mapcar (lambda (parser) (funcall parser session-id flags flag)) parsers))))
 
-(defun dbgpe-command-parse-flags (parsers flags)
-  (apply 'append (mapcar (apply-partially 'dbgpe-command-parse-flag parsers flags) flags)))
+(defun dbgpe-command-parse-flags (session-id parsers flags)
+  (apply 'append (mapcar (apply-partially 'dbgpe-command-parse-flag session-id parsers flags) flags)))
 
-(defun dbgpe-command-common-flag-parser (flags flag)
+(defun dbgpe-command-common-flag-parser (session-id flags flag)
   (pcase (car flag)
-    (`-i (progn (setq dbgpe-transaction-id (cdr flag))
-                `((transaction_id . ,(cdr flag)))))
+    (`-i (progn
+           (push (cons session-id (cons (cons 'transaction-id (cdr flag)) (assq session-id dbgpe-sessions)))
+                 dbgpe-sessions)
+           `((transaction_id . ,(cdr flag)))))
     (_ nil)))
 
-(defun dbgpe-command-feature-set-flag-parser (flags flag)
+(defun dbgpe-command-feature-set-flag-parser (session-id flags flag)
   (pcase (car flag)
     (`-n `((feature . ,(cdr flag))))
     (`-v `((success . "1")))
@@ -126,108 +131,118 @@
   '((xmlns . "urn:debugger_protocol_v1")
     (xmlns:xdebug . "http://xdebug.org/dbgp/xdebug")))
 
-(defun dbgpe-command-feature-set (flags)
+(defun dbgpe-command-feature-set (session-id flags)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "feature_set"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser
                  dbgpe-command-feature-set-flag-parser) flags)))))
 
-(defun dbgpe-command-feature-get (flags)
+(defun dbgpe-command-feature-get (session-id flags)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "feature_get") (cons 'supported "1"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser
                  dbgpe-command-feature-set-flag-parser) flags))
      ,(if (equal (cdr (assq '-n flags)) "encoding")
           (symbol-name dbgpe-encoding)
           "line conditional call return exception"))))
 
-(defun dbgpe-command-feature-stdout-flag-parser (flags flag)
+(defun dbgpe-command-feature-stdout-flag-parser (session-id flags flag)
   (pcase (car flag)
     (`-c `((success . "1")))
     (_ nil)))
 
-(defun dbgpe-command-stdout (flags)
+(defun dbgpe-command-stdout (session-id flags)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "stdout"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser
                  dbgpe-command-feature-stdout-flag-parser) flags)))))
 
-(defun dbgpe-command-stderr-flag-parser (flags flag)
+(defun dbgpe-command-stderr-flag-parser (session-id flags flag)
   (pcase (car flag)
     (`-c `((success . "0")))
     (_ nil)))
 
-(defun dbgpe-command-stderr (flags)
+(defun dbgpe-command-stderr (session-id flags)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "stderr"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser
                  dbgpe-command-stderr-flag-parser) flags)))))
 
-(defun dbgpe-command-context-names (flags)
+(defun dbgpe-command-context-names (session-id flags)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "context_names"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser) flags))
      (context ((name . "Locals")(id . "0")))
      (context ((name . "Superglobals")(id . "1")))
      (context ((name . "User defined constants")(id . "2"))))))
 
-(defun dbgpe-command-status (flags)
+(defun dbgpe-command-status (session-id flags)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "status")
                     (cons 'status "starting")
                     (cons 'reason "ok"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser) flags)))))
 
-(defun dbgpe-command-step-into (flags)
-  (dbgpe-stack-step)
+(defun dbgpe-command-step-into (session-id flags)
+  (dbgpe-stack-step session-id)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "step_into")
                     (cons 'status "break")
                     (cons 'reason "ok"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser) flags))
-     (xdebug:message ((filename . ,(dbgpe-get-fileuri))
-                      (lineno . ,(dbgpe-get-lineno)))))))
+     (xdebug:message ((filename . ,(dbgpe-get-fileuri session-id))
+                      (lineno . ,(dbgpe-get-lineno session-id)))))))
 
-(defun dbgpe-command-step-over (flags)
-  (dbgpe-stack-step)
+(defun dbgpe-command-step-over (session-id flags)
+  (dbgpe-stack-step session-id)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "step_into")
                     (cons 'status "break")
                     (cons 'reason "ok"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser) flags))
-     (xdebug:message ((filename . ,(dbgpe-get-fileuri))
-                      (lineno . ,(dbgpe-get-lineno)))))))
+     (xdebug:message ((filename . ,(dbgpe-get-fileuri session-id))
+                      (lineno . ,(dbgpe-get-lineno session-id)))))))
 
 
-(defun dbgpe-command-stack-get (flags)
-  (if (eq dbgpe-status 'stopped)
-      (dbgpe-disconnect)
+(defun dbgpe-command-stack-get (session-id flags)
+  (if (eq (cdr (assq 'status (assq session-id dbgpe-sessions))) 'stopped)
+      (progn (dbgpe-disconnect session-id)
+             nil)
     `((response
        ,(append (dbgpe-command-common)
                 (list (cons 'command "stack_get"))
                 (dbgpe-command-parse-flags
+                 session-id
                  '(dbgpe-command-common-flag-parser) flags))
        (stack ((where . "{main}")(level . "0")(type . "file")
-               (filename . ,(dbgpe-get-fileuri))
-               (lineno . ,(dbgpe-get-lineno))))))))
+               (filename . ,(dbgpe-get-fileuri session-id))
+               (lineno . ,(dbgpe-get-lineno session-id))))))))
 
-(defun dbgpe-command-source-flag-parser (flags flag)
+(defun dbgpe-command-source-flag-parser (session-id flags flag)
   (pcase (car flag)
     (`-f (list
           (base64-encode-string
@@ -239,52 +254,73 @@
              (buffer-string)))))
     (_ nil)))
 
-(defun dbgpe-command-source (flags)
+(defun dbgpe-command-source (session-id flags)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "source")
                     (cons 'encoding "base64"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser) flags))
-     ,@(dbgpe-command-parse-flags
+     ,@(dbgpe-command-parse-flags session-id
        '(dbgpe-command-source-flag-parser) flags))))
 
-(defun dbgpe-command-context-flag-parser (flags flag)
+(defun dbgpe-command-context-flag-parser (session-id flags flag)
   (pcase (car flag)
     (`-c `((context . ,(cdr flag))))
     (_ nil)))
 
-(defun dbgpe-command-context-get (flags)
-  (if (eq dbgpe-status 'stopped)
-      (dbgpe-disconnect)
+
+(defun dbgpe-command-context-get (session-id flags)
+  (if (eq (cdr (assq 'status (assq session-id dbgpe-sessions))) 'stopped)
+      (progn (dbgpe-disconnect)
+             nil)
     `((response
        ,(append (dbgpe-command-common)
                 (list (cons 'command "context_get"))
                 (dbgpe-command-parse-flags
+                 session-id
                  '(dbgpe-command-common-flag-parser
                    dbgpe-command-context-flag-parser) flags))
-       ,@dbgpe-context))))
+       ,@(cdr (assq 'context (assq session-id dbgpe-sessions)))))))
 
-(defun dbgpe-command-run (flags)
+(defun dbgpe-command-run (session-id flags)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "run")
                     (cons 'status "stopping")
                     (cons 'reason "ok"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser) flags)))))
 
-(defun dbgpe-command-stop (flags)
-  (setq dbgpe-status 'stopped)
+(defun dbgpe-command-stop (session-id flags)
+  (push (cons session-id (cons (cons 'status 'stopped) (assq session-id dbgpe-sessions)))
+        dbgpe-sessions)
   `((response
      ,(append (dbgpe-command-common)
               (list (cons 'command "stop")
                     (cons 'status "stopped")
                     (cons 'reason "ok"))
               (dbgpe-command-parse-flags
+               session-id
                '(dbgpe-command-common-flag-parser) flags)))))
 
 ;; * DBGPE proxy
+;; ** Single session utility functions
+;; Functions here have session-aware analogs higher up, for the debugger engine itself.
+(defun dbgpe-proxy-parse-command (command-split)
+  "Parse command COMMAND-SPLIT.
+This function works similarly to DBGPE-PARSE-COMMAND, only it does not take SESSION an argument."
+  (let* ((command-name-dashed (replace-regexp-in-string "_" "-" (car command-split)))
+         (fn-name (intern (concat "dbgpe-command-" command-name-dashed))))
+    (funcall fn-name (dbgpe-list-to-alist (cdr command-split)))))
+
+(defun dbgpe-proxy-command-parse-flag (parsers flags flag)
+  (delq nil (apply 'append (mapcar (lambda (parser) (funcall parser flags flag)) parsers))))
+
+(defun dbgpe-proxy-command-parse-flags (parsers flags)
+  (apply 'append (mapcar (apply-partially 'dbgpe-proxy-command-parse-flag parsers flags) flags)))
 ;; ** Debugger side
 (defvar dbgpe-proxy-debugger-listener nil)
 
@@ -293,7 +329,7 @@
 (defvar dbgpe-proxy-debuggers ())
 
 (defun dbgpe-proxy-debugger-init-process-filter (process string)
-  (let ((response (dbgpe-parse-command (split-string string))))
+  (let ((response (dbgpe-proxy-parse-command (split-string string))))
     (when response
       (process-send-string process (concat "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                                            (dbgpe-to-xml response)))))
@@ -308,7 +344,7 @@
 
 (defun dbgpe-proxy-reply (flags)
   `((proxyinit ((success . "1")
-                 ,@(dbgpe-command-parse-flags
+                 ,@(dbgpe-proxy-command-parse-flags
                     '(dbgpe-command-proxyinit-flag-parser) flags)))))
 
 (defun dbgpe-command-proxyinit (flags)

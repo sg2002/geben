@@ -66,7 +66,8 @@
         (geben-where)
         (geben-run)
         (geben 64)
-        (geben-test-restore-preserved-variables vars))))
+        (geben-test-restore-preserved-variables vars)
+        (sleep-for 2))))
 
 ;; * Tests
 (ert-deftest geben-test-context ()
@@ -80,7 +81,7 @@ ensure that it's displayed in separate window."
      (let ((window (selected-window)))
        (with-current-buffer (window-buffer (selected-window))
          (geben-display-context))
-       (sit-for 1)
+       (sit-for 2)
        (should (not (equal window (selected-window))))))))
 
 (defun buffer-contains-substring (string)
