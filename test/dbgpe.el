@@ -48,7 +48,7 @@
       (language . "PHP")
       (protocol_version . "1.0")
       (appid . "18408")
-      (idekey . "xdebug"))
+      (idekey . "geben"))
      (engine ((version . "2.4.0RC2")) "Xdebug")
      (author nil "Derick Rethans")
      (url nil "http://xdebug.org")

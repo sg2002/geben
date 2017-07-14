@@ -47,6 +47,19 @@
       (dbgpe-connect (if stack stack default-stack)
                      (if context context default-context))))
 
+(defun geben-test-dbgpe-genericfns (&optional stack context)
+  "Connects to php/generic.php, which is very basic php file for testing."
+  (let ((default-context '((property ((name . "$x")(fullname . "$x")
+                                      (type . "uninitialized")))))
+        (default-stack `(((filename . ,(concat (geben-test-get-test-directory)
+                                             "php/generic-fns.php"))
+                          (lineno . 1))
+                         ((filename . ,(concat (geben-test-get-test-directory)
+                                             "php/generic-fns.php"))
+                          (lineno . 1)))))
+      (dbgpe-connect (if stack stack default-stack)
+                     (if context context default-context))))
+
 (defvar geben-test-preserved-variables
   '(geben-pop-buffers-in-session
     geben-pop-buffers-for-new-session))
@@ -217,6 +230,70 @@ when geben-pop-buffers-for-new-session is set to nil"
        (should (equal window (selected-window)))
        (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic"))
        (with-current-buffer (window-buffer (selected-window)) (should geben-mode))))))
+
+(ert-deftest geben-test-pop-buffers-for-new-session-when-another-exists ()
+  "Check the ability to pop a new buffer for a new session
+when geben-pop-buffers-for-new-session is set to t and another session exists."
+  (let ((vars (geben-test-preserve-variable-values)))
+    (unwind-protect
+        (progn
+          (setq geben-pop-buffers-for-new-session t)
+          (dbgpe-proxy-start)
+          (sleep-for 2)
+          (geben-proxy "127.0.0.1" 9001 "geben" t)
+          (let ((s1 (progn (geben-test-dbgpe-generic)
+                           (sleep-for 2)
+                           (geben-where)
+                           (current-buffer)))
+                (window (selected-window))
+                (s2 (progn (geben-test-dbgpe-genericfns)
+                           (sleep-for 3)
+                           (geben-where)
+                           (current-buffer))))
+            (should (not (equal window (selected-window))))
+            (should (equal (file-name-base (buffer-file-name s1)) "generic"))
+            (should (equal (file-name-base (buffer-file-name s2)) "generic-fns"))
+            (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic-fns"))
+            (with-current-buffer s1
+              (geben-run))
+            (with-current-buffer s2
+              (geben-run))))
+      (geben-test-restore-preserved-variables vars)
+      (geben-proxy-end "geben")
+      (dbgpe-proxy-stop)
+      (sleep-for 2))))
+
+(ert-deftest geben-test-dont-pop-buffers-for-new-session-when-another-exists ()
+  "Check the ability to pop a new buffer for a new session
+when geben-pop-buffers-for-new-session is set to t and another session exists."
+  (let ((vars (geben-test-preserve-variable-values)))
+    (unwind-protect
+        (progn
+          (setq geben-pop-buffers-for-new-session nil)
+          (dbgpe-proxy-start)
+          (sleep-for 2)
+          (geben-proxy "127.0.0.1" 9001 "geben" t)
+          (let* ((s1 (progn (geben-test-dbgpe-generic)
+                            (sleep-for 3)
+                            (geben-where)
+                            (current-buffer)))
+                 (window (selected-window))
+                 (s2 (progn (geben-test-dbgpe-genericfns)
+                            (sleep-for 3)
+                            (car (car (window-prev-buffers window))))))
+            (should (equal window (selected-window)))
+            (should (equal (file-name-base (buffer-file-name s1)) "generic"))
+            (should (equal (file-name-base (buffer-file-name s2)) "generic-fns"))
+            (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic"))
+            (with-current-buffer s1
+              (geben-run))
+            (should (equal (file-name-base (buffer-file-name (window-buffer (selected-window)))) "generic"))
+            (with-current-buffer s2
+              (geben-run))))
+      (geben-test-restore-preserved-variables vars)
+      (geben-proxy-end "geben")
+      (dbgpe-proxy-stop)
+      (sleep-for 2))))
 
 (provide 'geben-test)
 ;;; geben-test.el ends here
